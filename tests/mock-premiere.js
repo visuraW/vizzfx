@@ -58,6 +58,8 @@ class Param {
 class Component {
   constructor(match, params) { this.match = match; this.params = params || CATALOG[match][1].map((n) => new Param(n)); }
   async getMatchName() { return this.match; }
+  async getInstanceName() { return this.instanceName || ""; }
+  createSetInstanceNameAction(n) { return () => { this.instanceName = n; }; }
   async getDisplayName() { return (CATALOG[this.match] || CATALOG["AE.ADBE Capsule"])[0]; }
   getParamCount() { return this.params.length; }
   getParam(i) { return this.params[i]; }
@@ -68,6 +70,7 @@ class Chain {
   getComponentCount() { return this.comps.length; }
   getComponentAtIndex(i) { return this.comps[i]; }
   createInsertComponentAction(c, i) { return () => { if (i > this.comps.length) throw new Error("bad index"); this.comps.splice(i, 0, c); }; }
+  createRemoveComponentAction(c) { return () => { this.comps = this.comps.filter((x) => x !== c); }; }
   createAppendComponentAction(c) { return () => this.comps.push(c); }
 }
 class VideoClipTrackItem {
@@ -77,6 +80,9 @@ class VideoClipTrackItem {
     this.chain = chain || new Chain([new Component("AE.ADBE Motion"), new Component("AE.ADBE Opacity")]);
   }
   async getName() { return this.name; }
+  createSetNameAction(n) { return () => { this.name = n; }; }
+  async isDisabled() { return !!this.disabled; }
+  createSetDisabledAction(d) { return () => { this.disabled = d; }; }
   async getComponentChain() { return this.chain; }
   async getTrackIndex() { return this.track.index; }
   async getStartTime() { return new TickTime(this.start); }
@@ -257,6 +263,22 @@ onload();
     const row = els.controls.children.find((r) => r.children && r.children.length && r.children[0].textContent === label);
     row.children[1].value = v;
     await row.children[1].handlers.change();
+  }
+  if (process.env.APPLIED) {
+    await els["tab-applied"].handlers.click();
+    await new Promise((r) => setTimeout(r, 50));
+    const rows = els["applied-list"].children.map((r) => r.children.length
+      ? `${r.children[0].children.map((x) => x.textContent).join(" | ")}  [${r.children.slice(1).map((x) => x.textContent).join("] [")}]`
+      : r.textContent);
+    process.stdout.write("APPLIED>\n  " + rows.join("\n  ") + "\n");
+    if (process.env.APPLIED === "toggle") {
+      const row = els["applied-list"].children.find((r) => r.children.length > 2);
+      await row.children[1].handlers.click();
+    }
+  }
+  if (process.env.REMOVE) {
+    const actions = els.controls.children.find((r) => r.className && r.className.includes("controls-actions"));
+    await actions.children[0].handlers.click();
   }
   if (process.env.SWATCH) {
     const row = els.controls.children.find((r) => r.className === "swatch-row");

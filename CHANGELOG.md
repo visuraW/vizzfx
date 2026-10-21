@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.11.0
+- The active look's card is highlighted, and the panel remembers it.
+- Remove button under each look's sliders, plus an Applied tab listing the looks on the selected clip, with layers on/off and Remove.
+- Everything VizzFX adds is labeled "VizzFX · <Look>".
+- Color split slider (with a gentler default) on Neon, CRT TV and LED Pixel. Corrected Film Impact setting names.
+- CRT Lines and CRT TV say clearly when the Scanlines template is missing.
+
 ## 1.10.0
 - Removed Eye View.
 

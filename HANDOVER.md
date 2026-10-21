@@ -67,17 +67,25 @@ scripts/build.sh        zips plugin/ into dist/VizzFX.ccx
   - The template preview video renders transparency wrongly; trust `thumb.png`.
 - **Colors:** set them with `new ppro.Color(r, g, b, 1)`, values 0–1.
 
+## Labels, Remove and Applied (v1.11)
+
+- Every effect VizzFX adds is labeled with its instance name, `VizzFX · <Look>`, which shows in Effect Controls.
+- Copies and templates are named the same way on the timeline.
+- **Remove** (under a look's sliders) and the **Applied** tab find items only by those labels, so they never touch the user's own effects.
+- Premiere has no API to switch an effect on or off, so Applied can only switch **layers** on and off; effects can only be removed.
+
 ## Open items
 
 1. **Scanlines template:** `VizzFX_Scanlines.mogrt` was exported to the user's Desktop but hasn't been sent yet. Bundle it into `plugin/mogrt/` to complete CRT Lines and CRT TV.
-2. **Film Impact setting names** (Glint, Volumetric Rays, Wonder Glow, RGB Split) are guesses. Get one real log (the missing-setting warnings list the actual names) and fix `SPLIT_PARAM`, `GLOW_PARAM` and `RAYS`.
+2. **Film Impact setting names** (Glint, Volumetric Rays, Wonder Glow, RGB Split) are partly guesses. A blog lists RGB Split as Channel Shift, Vertical Split, Position, Feather, Lightness and Softness. Volumetric Rays has Intensity and Ray Length. Glint may have no ray-count setting at all, which would explain why the Rays slider does nothing. Get one real log (the missing-setting warnings list the actual names) and fix `SPLIT_PARAM`, `GLOW_PARAM` and `RAYS`.
 3. **Screen blend value:** set a glow layer to Screen by hand, run Inspect, and put the number in the default.
 4. **Keyframe timing** (Shattered slice drift) is assumed to be measured from the clip's in point. Unverified.
 5. **Verify in Premiere:**
    - LED grid lines line up with the pixels
    - Diamond X-Ray defaults (preview looked too dark)
    - Grain default (4) compared with the reference flyer
-6. **Phase 2:** transitions (e.g. flash, zoom punch, smoke). The API can add built-in transitions but can't change their settings. Custom ones would need keyframed effects at the cut.
+6. **Thermal without the manual step:** try installing the LUT into Premiere's LUT folder and selecting it in Lumetri's Look menu. The real fix is a native C++ effect with a built-in gradient map (phase 3).
+7. **Phase 2:** transitions (e.g. flash, zoom punch, smoke). The API can add built-in transitions but can't change their settings. Custom ones would need keyframed effects at the cut.
 
 ## Working on it
 

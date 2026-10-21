@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.10.0";
+const VERSION = "1.11.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -325,7 +325,41 @@ async function findComponents(item, key) {
 
 // Insert available effects at `atIndex` (default: end of chain), in order.
 // Tries insert, append, then one-by-one; throws with Premiere's error if all fail.
+// Label shown on everything VizzFX adds, e.g. "VizzFX · Neon". Remove/Applied find items by it.
+let currentTag = null;
+const tagFor = (look) => `VizzFX · ${look.name}`;
+
 async function addEffects(project, item, keys, atIndex) {
+  const before = (await item.getComponentChain()).getComponentCount();
+  const added = await addEffectsRaw(project, item, keys, atIndex);
+  if (currentTag && added.length) {
+    const start = atIndex === undefined ? before : atIndex;
+    await tagComponents(project, item, start, added.length, currentTag);
+  }
+  return added;
+}
+
+let tagWarned = false;
+async function tagComponents(project, item, start, count, tag) {
+  try {
+    const chain = await item.getComponentChain();
+    transact(project, "VizzFX: label effects", (ca) => {
+      for (let i = start; i < start + count; i++) ca.addAction(chain.getComponentAtIndex(i).createSetInstanceNameAction(tag));
+    });
+  } catch (e) {
+    if (!tagWarned) log(`  · effects can't be labeled in this Premiere (${errText(e)}); Remove will match by effect type`, "warn");
+    tagWarned = true;
+  }
+}
+
+async function tagTrackItem(project, clip) {
+  if (!currentTag || !clip) return;
+  try {
+    transact(project, "VizzFX: label layer", (ca) => ca.addAction(clip.createSetNameAction(currentTag)));
+  } catch (e) { /* unnamed layer: still removable by hand */ }
+}
+
+async function addEffectsRaw(project, item, keys, atIndex) {
   const available = [];
   for (const k of keys) if (await resolveEffect(k)) available.push(k);
   if (!available.length) return [];
@@ -727,6 +761,7 @@ async function cloneTo(project, sequence, item, target, offsetSec, fps) {
   } catch (e) {
     log("  ! a duplicate audio clip may remain on an audio track; delete it by hand.", "warn");
   }
+  await tagTrackItem(project, clone);
   return clone;
 }
 
@@ -980,6 +1015,7 @@ async function applyHud({ project, sequence, item, opts, fps }) {
   if (!hud) throw new Error("Premiere didn't insert the HUD template.");
   const end = await item.getEndTime();
   transact(project, "VizzFX: trim HUD", (ca) => ca.addAction(hud.createSetEndAction(end)));
+  await tagTrackItem(project, hud);
   log(`  HUD on V${target + 1}`, "ok");
   log("  Edit its text, box position and size in Window > Essential Graphics.");
   log("  To track a face: keyframe Box Center (and Box Size) there.");
@@ -1117,7 +1153,7 @@ async function applyNeon({ project, item }) {
   const c = LOOK_CONTROLS.neon;
   await neonSetColors(project, item, c);
   await configure(project, item, "lumetri", { exposure: -0.2, contrast: 40, blacks: -c.darkness, saturation: 140 });
-  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: 8 });
+  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: c.split });
   await configure(project, item, "wonderGlow", { [GLOW_PARAM]: c.glow });
   log("  neon applied", "ok");
   return true;
@@ -1125,11 +1161,11 @@ async function applyNeon({ project, item }) {
 
 // Rays come from the clip's own highlights: Glint stars + Volumetric Rays shafts.
 const RAYS = {
-  count: "rays|points|number|count|streaks",
+  count: "rays|points|number|count|streaks|density",
   length: "length|size|scale",
-  threshold: "threshold|luma|brightness",
+  threshold: "threshold|highlights|luma|brightness",
   shaft: "intensity|exposure|strength|amount",
-  shaftLength: "length|distance|decay|size",
+  shaftLength: "ray length|length|distance|decay|size",
 };
 
 async function applyRays({ project, item }) {
@@ -1186,6 +1222,9 @@ const SCAN_MOGRT = "VizzFX_Scanlines.mogrt";
 
 // Bold lines through the frame (like the "ENERGY" title).
 async function applyCrtLines({ project, sequence, item, opts, fps }) {
+  if (!(await bundledFile(`mogrt/${SCAN_MOGRT}`))) {
+    throw new Error("CRT Lines needs the Scanlines template, which isn't installed yet.");
+  }
   const c = LOOK_CONTROLS.crtLines;
   await addOverlay(project, sequence, item, opts, fps, SCAN_MOGRT, "Scanlines", {
     lines: c.lines, "thickness %": c.thickness, "line opacity": c.opacity, "roll speed": c.roll,
@@ -1198,12 +1237,13 @@ async function applyCrtTv({ project, sequence, item, opts, fps }) {
   await addEffects(project, item, ["gaussian", "rgbSplit", "lumetri", "noise"]);
   const c = LOOK_CONTROLS.crtTv;
   await configure(project, item, "gaussian", { blurriness: c.softness, "repeat edge pixels": true });
-  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: 10 });
+  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: c.split });
   await configure(project, item, "lumetri", { exposure: 0.15, contrast: -10, saturation: c.color, amount: -1 });
   await configure(project, item, "noise", { "amount of noise|amount": 6, "noise type|use color noise": false });
-  await addOverlay(project, sequence, item, opts, fps, SCAN_MOGRT, "Scanlines", {
+  const lines = await addOverlay(project, sequence, item, opts, fps, SCAN_MOGRT, "Scanlines", {
     lines: c.lines, "thickness %": 50, "line opacity": c.opacity, "roll speed": c.roll,
   });
+  if (!lines) LOOKS.crtTv.doneMessage = "CRT TV added without scanlines (Scanlines template not installed yet).";
   log("  CRT TV applied", "ok");
   return true;
 }
@@ -1218,7 +1258,7 @@ async function applyWall({ project, item }) {
 }
 
 // Film Impact parameter names aren't documented; these try the likely ones.
-const SPLIT_PARAM = "amount|distance|offset|strength|split";
+const SPLIT_PARAM = "channel shift|shift|amount|distance|offset|strength|split";
 const GLOW_PARAM = "intensity|amount|strength|glow";
 
 // Slider definitions per look. `apply` updates one selected clip.
@@ -1231,7 +1271,7 @@ const CONTROL_DEFS = {
         const ov = await findOverlay(x.sequence, x.item, "Gap %");
         if (ov) setParams(x.project, ov.comp, { "gap %": v }, "LED gap");
       } },
-    { id: "split", label: "RGB split", min: 0, max: 100, step: 1, value: 20,
+    { id: "split", label: "Color split", min: 0, max: 50, step: 1, value: 6,
       apply: (x, v) => configure(x.project, x.item, "rgbSplit", { [SPLIT_PARAM]: v }) },
     { id: "glow", label: "Glow", min: 0, max: 100, step: 1, value: 40,
       apply: (x, v) => configure(x.project, x.item, "wonderGlow", { [GLOW_PARAM]: v }) },
@@ -1249,6 +1289,8 @@ const CONTROL_DEFS = {
       apply: (x, v) => configure(x.project, x.item, "lumetri", { blacks: -v }) },
     { id: "glow", label: "Glow", min: 0, max: 100, step: 1, value: 60,
       apply: (x, v) => configure(x.project, x.item, "wonderGlow", { [GLOW_PARAM]: v }) },
+    { id: "split", label: "Color split", min: 0, max: 50, step: 1, value: 3,
+      apply: (x, v) => configure(x.project, x.item, "rgbSplit", { [SPLIT_PARAM]: v }) },
   ],
   rays: [
     { id: "count", label: "Rays", min: 2, max: 16, step: 1, value: 6,
@@ -1297,6 +1339,8 @@ const CONTROL_DEFS = {
       apply: (x, v) => configure(x.project, x.item, "lumetri", { saturation: v }) },
     { id: "roll", label: "Roll", min: 0, max: 200, step: 1, value: 20,
       apply: (x, v) => setOverlayParam(x, "Roll Speed", v) },
+    { id: "split", label: "Color split", min: 0, max: 50, step: 1, value: 4,
+      apply: (x, v) => configure(x.project, x.item, "rgbSplit", { [SPLIT_PARAM]: v }) },
   ],
   wall: [
     { id: "grid", label: "Grid", min: 2, max: 3, step: 1, value: 2,
@@ -1339,11 +1383,7 @@ function renderControls(lookKey) {
   const box = document.getElementById("controls");
   if (!box) return;
   box.textContent = "";
-  const defs = CONTROL_DEFS[lookKey];
-  if (!defs) {
-    box.style.display = "none";
-    return;
-  }
+  const defs = CONTROL_DEFS[lookKey] || [];
   box.style.display = "block";
   const title = document.createElement("div");
   title.className = "section-label";
@@ -1381,6 +1421,14 @@ function renderControls(lookKey) {
     row.appendChild(val);
     box.appendChild(row);
   }
+  const actions = document.createElement("div");
+  actions.className = "tool-row controls-actions";
+  const remove = document.createElement("div");
+  remove.className = "chip danger";
+  remove.textContent = `Remove ${LOOKS[lookKey].name}`;
+  remove.addEventListener("click", safe(() => removeLook(lookKey)));
+  actions.appendChild(remove);
+  box.appendChild(actions);
 }
 
 // One swatch per palette: a chip showing its shadow-to-highlight gradient.
@@ -1445,13 +1493,170 @@ async function insertTemplate(project, sequence, item, path, target) {
   if (!clip) throw new Error("Premiere didn't insert the template.");
   const end = await item.getEndTime();
   transact(project, "VizzFX: trim template", (ca) => ca.addAction(clip.createSetEndAction(end)));
+  await tagTrackItem(project, clip);
   return clip;
+}
+
+// ---------------------------------------------------------------------------
+// Remove and Applied: find what VizzFX added by its "VizzFX · <look>" labels
+// ---------------------------------------------------------------------------
+async function instanceName(comp) {
+  try {
+    return (await comp.getInstanceName()) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// { tag: { effects: [component entries], layers: [track items] } } for one clip.
+async function vizzfxItems(sequence, item) {
+  const groups = {};
+  const group = (tag) => (groups[tag] = groups[tag] || { effects: [], layers: [] });
+  for (const c of await listComponents(item)) {
+    const n = await instanceName(c.comp);
+    if (n.startsWith("VizzFX · ")) group(n).effects.push(c);
+  }
+  const base = await item.getTrackIndex();
+  const start = (await item.getStartTime()).seconds;
+  const end = (await item.getEndTime()).seconds;
+  const count = await sequence.getVideoTrackCount();
+  for (let t = base + 1; t < count; t++) {
+    for (const it of await itemsOnTrack(await sequence.getVideoTrack(t))) {
+      const s = (await it.getStartTime()).seconds;
+      if (s < start - 0.05 || s >= end) continue;
+      const n = await nameOf(it);
+      if (n.startsWith("VizzFX · ")) group(n).layers.push(it);
+    }
+  }
+  return groups;
+}
+
+async function removeGroup(project, sequence, item, g) {
+  if (g.effects.length) {
+    const chain = await item.getComponentChain();
+    transact(project, "VizzFX: remove effects", (ca) => {
+      for (const c of g.effects) ca.addAction(chain.createRemoveComponentAction(c.comp));
+    });
+  }
+  if (g.layers.length) removeItems(project, sequence, g.layers, ppro.Constants.MediaType.VIDEO, "VizzFX: remove layers");
+}
+
+// Remove one look (or every VizzFX look when lookKey is null) from the selected clips.
+async function removeLook(lookKey) {
+  const { project, sequence } = await getContext();
+  const clips = await getSelectedVideoClips(sequence);
+  if (!clips.length) throw new Error("Select the clip to remove the look from.");
+  const tag = lookKey ? tagFor(LOOKS[lookKey]) : null;
+  let effects = 0;
+  let layers = 0;
+  for (const item of clips) {
+    const groups = await vizzfxItems(sequence, item);
+    for (const [t, g] of Object.entries(groups)) {
+      if (tag && t !== tag) continue;
+      await removeGroup(project, sequence, item, g);
+      effects += g.effects.length;
+      layers += g.layers.length;
+    }
+  }
+  const what = lookKey ? LOOKS[lookKey].name : "VizzFX looks";
+  if (!effects && !layers) {
+    status(`No ${what} found on the selected clip. (Looks added before v1.11 aren't labeled; remove those by hand.)`, "warn");
+  } else {
+    status(`Removed ${what}: ${effects} effect${effects === 1 ? "" : "s"}, ${layers} layer${layers === 1 ? "" : "s"}.`, "ok");
+  }
+  if (document.getElementById("view-applied").style.display === "block") await renderApplied();
+}
+
+// Applied tab: looks on the selected clip, with layer on/off and remove.
+async function renderApplied() {
+  const box = document.getElementById("applied-list");
+  box.textContent = "";
+  const note = (text) => {
+    const d = document.createElement("div");
+    d.className = "hint";
+    d.textContent = text;
+    box.appendChild(d);
+  };
+  let ctx;
+  try {
+    ctx = await getContext();
+  } catch (e) {
+    return note(errText(e));
+  }
+  const clips = await getSelectedVideoClips(ctx.sequence);
+  if (!clips.length) return note("Select a clip to see its VizzFX looks.");
+  const item = clips[0];
+  const groups = await vizzfxItems(ctx.sequence, item);
+  const tags = Object.keys(groups);
+  if (!tags.length) return note(`No VizzFX looks on "${await nameOf(item)}".`);
+  for (const tag of tags) {
+    const g = groups[tag];
+    const row = document.createElement("div");
+    row.className = "applied-row";
+    const info = document.createElement("div");
+    info.className = "applied-info";
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = tag.replace("VizzFX · ", "");
+    const sub = document.createElement("div");
+    sub.className = "card-desc";
+    sub.textContent = `${g.effects.length} effect${g.effects.length === 1 ? "" : "s"}` +
+      (g.layers.length ? `, ${g.layers.length} layer${g.layers.length === 1 ? "" : "s"}` : "");
+    info.appendChild(title);
+    info.appendChild(sub);
+    row.appendChild(info);
+    if (g.layers.length) {
+      let off = false;
+      try {
+        off = await g.layers[0].isDisabled();
+      } catch (e) { /* assume on */ }
+      const toggle = document.createElement("div");
+      toggle.className = "chip" + (off ? "" : " on");
+      toggle.textContent = off ? "Layers off" : "Layers on";
+      toggle.addEventListener("click", safe(async () => {
+        transact(ctx.project, "VizzFX: toggle layers", (ca) => {
+          for (const it of g.layers) ca.addAction(it.createSetDisabledAction(!off));
+        });
+        await renderApplied();
+      }));
+      row.appendChild(toggle);
+    }
+    const remove = document.createElement("div");
+    remove.className = "chip danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", safe(async () => {
+      await removeGroup(ctx.project, ctx.sequence, item, g);
+      status(`Removed ${tag.replace("VizzFX · ", "")}.`, "ok");
+      await renderApplied();
+    }));
+    row.appendChild(remove);
+    box.appendChild(row);
+  }
+  note("Effects can't be switched off from a plugin (Premiere has no API for it), so effects can only be removed. Layers can be switched on and off.");
+}
+
+// Highlight the active look's card and remember it.
+const cardEls = {};
+function setActiveCard(lookKey) {
+  for (const [k, el] of Object.entries(cardEls)) el.className = "card" + (k === lookKey ? " active" : "");
+  try {
+    localStorage.setItem("vizzfx-last-look", lookKey);
+  } catch (e) { /* not remembered */ }
+}
+
+function showView(name) {
+  for (const v of ["looks", "applied"]) {
+    document.getElementById(`view-${v}`).style.display = v === name ? "block" : "none";
+    document.getElementById(`tab-${v}`).className = "tab" + (v === name ? " active" : "");
+  }
+  if (name === "applied") safe(renderApplied)();
 }
 
 let busy = false;
 
 async function applyLook(lookKey) {
   if (busy) return;
+  setActiveCard(lookKey);
   renderControls(lookKey);
   busy = true;
   document.body.classList.add("busy");
@@ -1465,6 +1670,7 @@ async function applyLook(lookKey) {
 
 async function buildLook(lookKey) {
   const look = LOOKS[lookKey];
+  currentTag = tagFor(look);
   const opts = readOptions();
   saveOptions();
   log(look.name, "head");
@@ -1609,6 +1815,7 @@ function renderLooks() {
     card.appendChild(title);
     card.appendChild(desc);
     card.addEventListener("click", safe(() => applyLook(key)));
+    cardEls[key] = card;
     grid.appendChild(card);
   }
 }
@@ -1627,6 +1834,17 @@ window.addEventListener("load", () => {
   loadOptions();
   loadControls();
   renderLooks();
+  let last = null;
+  try {
+    last = localStorage.getItem("vizzfx-last-look");
+  } catch (e) { /* none */ }
+  if (last && LOOKS[last]) {
+    setActiveCard(last);
+    renderControls(last);
+  }
+  document.getElementById("tab-looks").addEventListener("click", () => showView("looks"));
+  document.getElementById("tab-applied").addEventListener("click", () => showView("applied"));
+  document.getElementById("btn-refresh-applied").addEventListener("click", safe(renderApplied));
   toggle("btn-settings", "settings");
   toggle("btn-log", "logwrap");
   let host = "";
