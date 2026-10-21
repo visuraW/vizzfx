@@ -34,7 +34,7 @@ VizzFX adds layers on free tracks above your clip, and adds tracks if it needs m
 
 **Sliders:** after you click LED Pixel or Diamond X-Ray, its sliders appear under the cards. Moving one updates the selected clips live.
 
-**LED grid gaps:** run `after-effects/build-led-grid-mogrt.jsx` in After Effects once, the same way as the HUD script. Until the grid template is bundled, LED Pixel works without the gaps.
+**LED grid:** the gaps and subpixel lines are a template placed above the clip. The Pixels and Gap sliders keep it lined up with the pixels. Fine-tune Gap Opacity and Subpixels in Window > Essential Graphics.
 
 To reuse a look as a preset: select the effects in Effect Controls, right-click, and choose **Save Preset**.
 
