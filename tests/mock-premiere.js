@@ -18,6 +18,14 @@ const CATALOG = {
   "AE.ADBE Echo": ["Echo", ["Echo Time (seconds)", "Number Of Echoes", "Starting Intensity", "Decay", "Echo Operator"]],
   "AE.ADBE Lumetri": ["Lumetri Color", ["Basic Correction", "Input LUT", "Exposure", "Contrast", "Highlights", "Shadows", "Whites", "Blacks", "Saturation", "Creative", "Look", "Saturation", "Amount"]],
   "AE.ADBE Posterize Time": ["Posterize Time", ["Frame Rate"]],
+  "AE.ADBE Mosaic": ["Mosaic (Legacy)", ["Horizontal Blocks", "Vertical Blocks", "Sharp Colors"]],
+  "AE.Impact_RGB_Split_FX": ["RGB Split", ["Amount", "Angle"]],
+  "AE.Impact_Wonder_Glow_FX": ["Wonder Glow", ["Intensity", "Radius"]],
+  "AE.Impact_Glint_FX": ["Glint", ["Threshold", "Length"]],
+  "AE.ADBE Black & White": ["Black & White", []],
+  "AE.ADBE Brightness & Contrast 2": ["Brightness & Contrast", ["Brightness", "Contrast"]],
+  "AE.ADBE Sharpen": ["Sharpen", ["Sharpen Amount"]],
+  "AE.ADBE Capsule": ["VizzFX LED Grid", ["Rows", "Frame Width", "Frame Height", "Gap %", "Gap Opacity", "Subpixels"]],
   "AE.ADBE Noise2": ["Noise (Legacy)", ["Amount of Noise", "Noise Type", "Clipping"]],
   "AE.ADBE_Noise_FX": ["Noise", ["Strength", "Size"]],
   "AE.ADBE Motion Blur": ["Directional Blur", ["Direction", "Blur Length"]],
@@ -94,6 +102,7 @@ const sequence = {
   async getAudioTrackCount() { return aTracks.length; },
   async getAudioTrack(i) { return aTracks[i]; },
   async getTimebase() { return String(TPS / 30); },
+  async getFrameSize() { const [w, h] = (process.env.FRAME || "1920x1080").split("x").map(Number); return { width: w, height: h }; },
 };
 let undoSteps = 0;
 const project = {
@@ -135,7 +144,8 @@ const ppro = {
       },
       insertMogrtFromPath: (path, t, vIdx) => {
         const tr = vTracks[vIdx];
-        const c = new VideoClipTrackItem("VizzFX HUD", tr, t.seconds, t.seconds + 10);
+        const c = new VideoClipTrackItem(path.includes("LED") ? "VizzFX LED Grid" : "VizzFX HUD", tr, t.seconds, t.seconds + 10);
+        if (path.includes("LED")) c.chain.comps.push(new Component("AE.ADBE Capsule"));
         tr.items.push(c);
         logLines.push(`MOGRT> ${path.split("/").slice(-2).join("/")} on V${vIdx + 1}`);
         return [c];
@@ -171,6 +181,7 @@ function makeEl(id) {
     classList: { add() {}, remove() {}, toggle() {} },
     appendChild(c) { this.children.push(c); if (id === "log") logLines.push(`${c.className ? "[" + c.className + "] " : ""}${c.textContent}`); },
     addEventListener(ev, fn) { this.handlers[ev] = fn; },
+    setAttribute(k, v) { this[k] = v; if (k === "value") this.value = v; },
   };
 }
 const getEl = (id) => (els[id] = els[id] || makeEl(id));
@@ -226,9 +237,16 @@ onload();
 
 (async () => {
   const which = process.argv[3] || "shattered";
-  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain" }[which];
+  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain", led: "LED Pixel", diamond: "Diamond X-Ray" }[which];
   await clickLook(name);
   if (process.argv[4] === "twice") await clickLook(name);
+  if (process.env.CTRL) {
+    // CTRL="Pixels (rows)=80" drags that look slider
+    const [label, v] = process.env.CTRL.split("=");
+    const row = els.controls.children.find((r) => r.children && r.children.length && r.children[0].textContent === label);
+    row.children[1].value = v;
+    await row.children[1].handlers.change();
+  }
   if (process.env.SLIDE) {
     els["opt-grain"].value = process.env.SLIDE;
     await els["opt-grain"].handlers.change();

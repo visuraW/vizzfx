@@ -10,6 +10,8 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 - Low Shutter: stepped 6 fps motion with soft smear, fades in from black
 - Thermal: heat-camera colors
 - Tracking HUD: sci-fi HUD with editable text, keyframe the box to follow a face
+- LED Pixel: pixel grid with RGB fringes and glow. Set how many pixel rows you want; works on vertical video too
+- Diamond X-Ray: black and white made of sparkling crystals, like an x-ray of diamonds
 - Film Grain: fine monochrome grain. The Grain slider adjusts it live on the selected clips (and the grain in other looks)
 
 ## Install
@@ -29,6 +31,10 @@ VizzFX adds layers on free tracks above your clip, and adds tracks if it needs m
 **Thermal:** Premiere doesn't let plugins load LUTs. The first time, VizzFX asks where to save `VizzFX_Thermal.cube` (or [download it](https://github.com/visuraW/vizzfx/raw/main/plugin/luts/VizzFX_Thermal.cube) with right-click > Save Link As). Then pick it in Lumetri Color > Basic Correction > Input LUT > Browse, and save the effects as a preset.
 
 **Tracking HUD:** edit the text, box position and size in Window > Essential Graphics. Keyframe Box Center to follow a face. (To change the HUD design, edit `after-effects/build-hud-mogrt.jsx` and re-export it from After Effects.)
+
+**Sliders:** after you click LED Pixel or Diamond X-Ray, its sliders appear under the cards. Moving one updates the selected clips live.
+
+**LED grid gaps:** run `after-effects/build-led-grid-mogrt.jsx` in After Effects once, the same way as the HUD script. Until the grid template is bundled, LED Pixel works without the gaps.
 
 To reuse a look as a preset: select the effects in Effect Controls, right-click, and choose **Save Preset**.
 

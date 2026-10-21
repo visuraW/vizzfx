@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0
+- New looks: LED Pixel (pixel count by rows, square pixels on any frame shape) and Diamond X-Ray.
+- Live sliders per look: Pixels, Gap, RGB split, Glow, Saturation / Sparkle, Crystal size, Crush, Brightness, Glow.
+- After Effects script for the LED grid template.
+
 ## 1.6.0
 - Film Grain look, matched to a reference flyer (fine, monochrome).
 - Grain slider updates grain live on selected clips; re-applying updates instead of stacking.

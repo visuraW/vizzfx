@@ -65,3 +65,5 @@ body.busy .card { opacity: 0.5; }
 .slider-row .label { color: #f2f2f2; margin-right: 10px; }
 .slider-row .slider { flex: 1 1 auto; min-width: 0; }
 .slider-row .slider-value { width: 32px; text-align: right; color: #d0d0d0; margin-left: 8px; }
+.controls { display: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid #3a3a3a; }
+.controls .slider-row .label { width: 92px; flex: 0 0 92px; }

@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.6.0";
+const VERSION = "1.7.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -49,6 +49,18 @@ Object.assign(LOOKS, {
     signature: ["lumetri", "gaussian"],
     apply: (ctx) => applyThermal(ctx),
   },
+  led: {
+    name: "LED Pixel",
+    desc: "Pixel grid, RGB fringes, glow",
+    signature: ["mosaic"],
+    apply: (ctx) => applyLed(ctx),
+  },
+  diamond: {
+    name: "Diamond X-Ray",
+    desc: "Crystal sparkle, black and white",
+    signature: ["blackWhite", "brightContrast"],
+    apply: (ctx) => applyDiamond(ctx),
+  },
   grain: {
     name: "Film Grain",
     desc: "Fine mono grain, adjustable",
@@ -77,6 +89,13 @@ const EFFECTS = {
   gaussian: [["Gaussian Blur (Legacy)", "Gaussian Blur"], ["AE.ADBE Gaussian Blur 2"]],
   linearWipe: [["Linear Wipe (Legacy)", "Linear Wipe"], ["AE.ADBE Linear Wipe"]],
   transform: [["Transform"], ["AE.ADBE Geometry2"]],
+  mosaic: [["Mosaic (Legacy)", "Mosaic"], ["AE.ADBE Mosaic"]],
+  rgbSplit: [["RGB Split"], ["AE.Impact_RGB_Split_FX"]],
+  wonderGlow: [["Wonder Glow"], ["AE.Impact_Wonder_Glow_FX"]],
+  glint: [["Glint"], ["AE.Impact_Glint_FX"]],
+  blackWhite: [["Black & White"], ["AE.ADBE Black & White"]],
+  brightContrast: [["Brightness & Contrast"], ["AE.ADBE Brightness & Contrast 2"]],
+  sharpen: [["Sharpen"], ["AE.ADBE Sharpen"]],
 };
 const effectLabel = (key) => EFFECTS[key][0][0];
 
@@ -245,13 +264,15 @@ async function listComponents(item) {
 }
 
 // Last component of this kind on the clip (the one just added), or null.
+const INTRINSIC = { opacity: "AE.ADBE Opacity", motion: "AE.ADBE Motion" };
+
 async function findComponent(item, key) {
-  const match = key === "opacity" ? null : await resolveEffect(key);
-  if (key !== "opacity" && !match) return null;
+  const match = INTRINSIC[key] || (await resolveEffect(key));
+  if (!match) return null;
   const comps = await listComponents(item);
   for (let i = comps.length - 1; i >= 0; i--) {
     const c = comps[i];
-    if (match ? c.match === match : c.match === "AE.ADBE Opacity" || c.name.toLowerCase() === "opacity") return c;
+    if (c.match === match || (INTRINSIC[key] && c.name.toLowerCase() === key)) return c;
   }
   return null;
 }
@@ -363,7 +384,7 @@ function setParams(project, comp, values, label) {
 // Set params on the effect of this kind if the clip has it.
 async function configure(project, item, key, values, label) {
   const c = await findComponent(item, key);
-  if (c) setParams(project, c.comp, values, label || (key === "opacity" ? "Opacity" : effectLabel(key)));
+  if (c) setParams(project, c.comp, values, label || (INTRINSIC[key] ? key : effectLabel(key)));
   return !!c;
 }
 
@@ -919,10 +940,234 @@ async function applyHud({ project, sequence, item, opts, fps }) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// LED Pixel and Diamond X-Ray, with live sliders
+// ---------------------------------------------------------------------------
+const LED_MOGRT = "VizzFX_LED_Grid.mogrt";
+
+async function frameSize(sequence) {
+  try {
+    const r = await sequence.getFrameSize();
+    if (r && r.width > 0 && r.height > 0) return { w: r.width, h: r.height };
+  } catch (e) { /* fall through */ }
+  return { w: 1920, h: 1080 };
+}
+
+// Columns follow the frame's shape so pixels stay square (works for vertical video too).
+function ledGrid(rows, frame) {
+  const r = Math.max(1, Math.round(rows));
+  return { rows: r, cols: Math.max(1, Math.round((r * frame.w) / frame.h)) };
+}
+
+// The grid overlay sitting above `item`: a template clip starting where the item starts.
+async function findOverlay(sequence, item, paramName) {
+  const base = await item.getTrackIndex();
+  const start = (await item.getStartTime()).seconds;
+  const n = await sequence.getVideoTrackCount();
+  for (let t = base + 1; t < n; t++) {
+    for (const it of await itemsOnTrack(await sequence.getVideoTrack(t))) {
+      if (Math.abs((await it.getStartTime()).seconds - start) > 0.05) continue;
+      for (const c of await listComponents(it)) {
+        if (c.match === "AE.ADBE Capsule" && findParam(c.comp, paramName)) return { item: it, comp: c.comp };
+      }
+    }
+  }
+  return null;
+}
+
+async function ledSetPixels(project, sequence, item, rows) {
+  const frame = await frameSize(sequence);
+  const g = ledGrid(rows, frame);
+  await configure(project, item, "mosaic", { "horizontal blocks": g.cols, "vertical blocks": g.rows, "sharp colors": true });
+  const ov = await findOverlay(sequence, item, "Rows");
+  if (ov) setParams(project, ov.comp, { rows: g.rows, "frame width": frame.w, "frame height": frame.h }, "LED grid");
+  return g;
+}
+
+async function applyLed({ project, sequence, item, opts, fps }) {
+  if (!(await resolveEffect("mosaic"))) throw new Error("Mosaic is missing in this Premiere.");
+  await addEffects(project, item, ["mosaic", "lumetri", "rgbSplit", "wonderGlow"]);
+  const c = LOOK_CONTROLS.led;
+  const g = await ledSetPixels(project, sequence, item, c.pixels);
+  await configure(project, item, "lumetri", { exposure: 0.3, contrast: 25, saturation: c.saturation });
+  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: c.split });
+  await configure(project, item, "wonderGlow", { [GLOW_PARAM]: c.glow });
+  log(`  pixels: ${g.cols} x ${g.rows}`, "ok");
+
+  // Gaps and subpixel lines come from the grid template on the track above.
+  const path = await bundledFile(`mogrt/${LED_MOGRT}`);
+  if (!path) {
+    log("  LED grid template not installed yet: pixels without gaps (see after-effects/build-led-grid-mogrt.jsx)", "warn");
+    return true;
+  }
+  const layers = await prepareTracks(project, sequence, item, [{ id: "hud", kind: "grid", label: "LED grid", offset: 0 }], opts, fps);
+  if (!layers || !layers.length) return true;
+  const grid = await insertTemplate(project, sequence, item, path, layers[0].target);
+  const frame = await frameSize(sequence);
+  const capsule = (await listComponents(grid)).find((x) => x.match === "AE.ADBE Capsule");
+  if (capsule) {
+    setParams(project, capsule.comp, { rows: g.rows, "frame width": frame.w, "frame height": frame.h, "gap %": c.gap }, "LED grid");
+  }
+  // The template is 1920 square; scale it to cover larger frames.
+  const scale = (Math.max(frame.w, frame.h) / 1920) * 100;
+  if (Math.abs(scale - 100) > 0.5) await configure(project, grid, "motion", { scale });
+  log(`  LED grid on V${layers[0].target + 1}`, "ok");
+  return true;
+}
+
+async function applyDiamond({ project, item }) {
+  await addEffects(project, item, ["blackWhite", "lumetri", "noise", "gaussian", "brightContrast", "sharpen", "glint", "wonderGlow"]);
+  const c = LOOK_CONTROLS.diamond;
+  await configure(project, item, "lumetri", { exposure: 0.6, contrast: 60, whites: 40, blacks: -40 });
+  await configure(project, item, "noise", { "amount of noise|amount": c.sparkle, "noise type|use color noise": false, clipping: true });
+  await configure(project, item, "gaussian", { blurriness: c.crystal, "repeat edge pixels": true });
+  await configure(project, item, "brightContrast", { brightness: c.brightness, contrast: c.crush });
+  await configure(project, item, "sharpen", { "sharpen amount|amount": 30 });
+  await configure(project, item, "wonderGlow", { [GLOW_PARAM]: c.glow });
+  log("  diamond x-ray applied", "ok");
+  return true;
+}
+
+// Film Impact parameter names aren't documented; these try the likely ones.
+const SPLIT_PARAM = "amount|distance|offset|strength|split";
+const GLOW_PARAM = "intensity|amount|strength|glow";
+
+// Slider definitions per look. `apply` updates one selected clip.
+const CONTROL_DEFS = {
+  led: [
+    { id: "pixels", label: "Pixels (rows)", min: 8, max: 240, step: 1, value: 54,
+      apply: (x, v) => ledSetPixels(x.project, x.sequence, x.item, v) },
+    { id: "gap", label: "Gap", min: 0, max: 60, step: 1, value: 18,
+      apply: async (x, v) => {
+        const ov = await findOverlay(x.sequence, x.item, "Gap %");
+        if (ov) setParams(x.project, ov.comp, { "gap %": v }, "LED gap");
+      } },
+    { id: "split", label: "RGB split", min: 0, max: 100, step: 1, value: 20,
+      apply: (x, v) => configure(x.project, x.item, "rgbSplit", { [SPLIT_PARAM]: v }) },
+    { id: "glow", label: "Glow", min: 0, max: 100, step: 1, value: 40,
+      apply: (x, v) => configure(x.project, x.item, "wonderGlow", { [GLOW_PARAM]: v }) },
+    { id: "saturation", label: "Saturation", min: 0, max: 200, step: 1, value: 130,
+      apply: (x, v) => configure(x.project, x.item, "lumetri", { saturation: v }) },
+  ],
+  diamond: [
+    { id: "sparkle", label: "Sparkle", min: 0, max: 100, step: 1, value: 35,
+      apply: (x, v) => configure(x.project, x.item, "noise", { "amount of noise|amount": v }) },
+    { id: "crystal", label: "Crystal size", min: 0, max: 10, step: 0.5, value: 2,
+      apply: (x, v) => configure(x.project, x.item, "gaussian", { blurriness: v }) },
+    { id: "crush", label: "Crush", min: 0, max: 100, step: 1, value: 60,
+      apply: (x, v) => configure(x.project, x.item, "brightContrast", { contrast: v }) },
+    { id: "brightness", label: "Brightness", min: -100, max: 100, step: 1, value: -10,
+      apply: (x, v) => configure(x.project, x.item, "brightContrast", { brightness: v }) },
+    { id: "glow", label: "Glow", min: 0, max: 100, step: 1, value: 50,
+      apply: (x, v) => configure(x.project, x.item, "wonderGlow", { [GLOW_PARAM]: v }) },
+  ],
+};
+
+// Current slider values per look, persisted.
+const LOOK_CONTROLS = {};
+function loadControls() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem("vizzfx-controls") || "{}");
+  } catch (e) { /* defaults */ }
+  for (const [look, defs] of Object.entries(CONTROL_DEFS)) {
+    LOOK_CONTROLS[look] = {};
+    for (const d of defs) LOOK_CONTROLS[look][d.id] = saved[look] && saved[look][d.id] !== undefined ? saved[look][d.id] : d.value;
+  }
+}
+function saveControls() {
+  try {
+    localStorage.setItem("vizzfx-controls", JSON.stringify(LOOK_CONTROLS));
+  } catch (e) { /* not saved */ }
+}
+
+// Show the sliders of `lookKey` under the cards; changes apply live to selected clips.
+function renderControls(lookKey) {
+  const box = document.getElementById("controls");
+  if (!box) return;
+  box.textContent = "";
+  const defs = CONTROL_DEFS[lookKey];
+  if (!defs) {
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "block";
+  const title = document.createElement("div");
+  title.className = "section-label";
+  title.textContent = `ADJUST ${LOOKS[lookKey].name.toUpperCase()}`;
+  box.appendChild(title);
+  for (const d of defs) {
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = d.label;
+    const slider = document.createElement("sp-slider");
+    slider.className = "slider";
+    slider.setAttribute("min", d.min);
+    slider.setAttribute("max", d.max);
+    slider.setAttribute("step", d.step);
+    slider.setAttribute("value", LOOK_CONTROLS[lookKey][d.id]);
+    const val = document.createElement("span");
+    val.className = "slider-value";
+    val.textContent = LOOK_CONTROLS[lookKey][d.id];
+    slider.addEventListener("input", () => (val.textContent = slider.value));
+    slider.addEventListener("change", safe(async () => {
+      const v = Number(slider.value);
+      LOOK_CONTROLS[lookKey][d.id] = v;
+      val.textContent = v;
+      saveControls();
+      await applyControl(lookKey, d, v);
+    }));
+    row.appendChild(label);
+    row.appendChild(slider);
+    row.appendChild(val);
+    box.appendChild(row);
+  }
+}
+
+async function applyControl(lookKey, def, value) {
+  const { project, sequence } = await getContext();
+  const clips = await getSelectedVideoClips(sequence);
+  if (!clips.length) return status(`${def.label}: ${value}. Select a clip with ${LOOKS[lookKey].name} to update it.`);
+  for (const item of clips) await def.apply({ project, sequence, item }, value);
+  status(`${def.label}: ${value} on ${clips.length} clip${clips.length > 1 ? "s" : ""}.`, "ok");
+}
+
+async function bundledFile(rel) {
+  try {
+    const folder = await require("uxp").storage.localFileSystem.getPluginFolder();
+    const entry = await folder.getEntry(rel);
+    if (entry) return entry.nativePath;
+  } catch (e) { /* not bundled */ }
+  return null;
+}
+
+// Insert a .mogrt at `item`'s start on video track `target`, trimmed to the item.
+async function insertTemplate(project, sequence, item, path, target) {
+  const start = await item.getStartTime();
+  const editor = ppro.SequenceEditor.getEditor(sequence);
+  let inserted = [];
+  try {
+    project.lockedAccess(() => {
+      inserted = editor.insertMogrtFromPath(path, start, target, 0) || [];
+    });
+  } catch (e) {
+    log(`  · insert under lock failed (${errText(e)}), retrying`, "warn");
+    inserted = editor.insertMogrtFromPath(path, start, target, 0) || [];
+  }
+  const clip = inserted.find((i) => i instanceof ppro.VideoClipTrackItem) || inserted[0];
+  if (!clip) throw new Error("Premiere didn't insert the template.");
+  const end = await item.getEndTime();
+  transact(project, "VizzFX: trim template", (ca) => ca.addAction(clip.createSetEndAction(end)));
+  return clip;
+}
+
 let busy = false;
 
 async function applyLook(lookKey) {
   if (busy) return;
+  renderControls(lookKey);
   busy = true;
   document.body.classList.add("busy");
   try {
@@ -1095,6 +1340,7 @@ function toggle(buttonId, sectionId) {
 
 window.addEventListener("load", () => {
   loadOptions();
+  loadControls();
   renderLooks();
   toggle("btn-settings", "settings");
   toggle("btn-log", "logwrap");
