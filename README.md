@@ -15,7 +15,6 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 - Neon: Vice City style glow. Pick a palette (Vice, Purple Haze, Cyber, Toxic, Sunset, Ice) or any hue
 - Light Rays: star rays and light shafts that come from the bright parts of the video. Choose how many rays
 - Lens Tube: shooting through a lens, with a blurry barrel ring and bokeh. Ring and bokeh are adjustable
-- Eye View: your video seen through a living eye, with a breathing pupil and drifting iris. Color or black and white
 - CRT Lines: bold horizontal lines through the frame
 - CRT TV: old TV look with fine scanlines, a soft washed picture and color fringing
 - Video Wall: the clip repeated in a 2x2 or 3x3 grid

@@ -31,7 +31,6 @@ const CATALOG = {
   "AE.Impact_Volumetric_Rays_FX": ["Volumetric Rays", ["Center", "Exposure", "Decay"]],
   "AE.ADBE Replicate": ["Replicate", ["Count"]],
   "AE.ADBE Capsule Scan": ["VizzFX Scanlines", ["Frame Width", "Frame Height", "Lines", "Thickness %", "Line Opacity", "Roll Speed", "Flicker"]],
-  "AE.ADBE Capsule Eye": ["VizzFX Eye", ["Frame Width", "Frame Height", "Pupil Size", "Pupil Pulse", "Fiber Opacity", "Rotation Speed"]],
   "PR.ADBE Lens Distortion": ["Lens Distortion", ["Curvature", "Vertical Decentering", "Horizontal Decentering"]],
   "AE.ADBE Noise2": ["Noise (Legacy)", ["Amount of Noise", "Noise Type", "Clipping"]],
   "AE.ADBE_Noise_FX": ["Noise", ["Strength", "Size"]],
@@ -154,7 +153,7 @@ const ppro = {
         const tr = vTracks[vIdx];
         const c = new VideoClipTrackItem(path.includes("LED") ? "VizzFX LED Grid" : "VizzFX HUD", tr, t.seconds, t.seconds + 10);
         if (path.includes("LED")) c.chain.comps.push(new Component("AE.ADBE Capsule"));
-        for (const [tag, key] of [["Scanlines", "AE.ADBE Capsule Scan"], ["Eye", "AE.ADBE Capsule Eye"]]) {
+        for (const [tag, key] of [["Scanlines", "AE.ADBE Capsule Scan"]]) {
           if (path.includes(tag)) { const k = new Component(key); k.match = "AE.ADBE Capsule"; c.chain.comps.push(k); }
         }
         if (path.includes("Lens")) { const k = new Component("AE.ADBE Capsule Lens"); k.match = "AE.ADBE Capsule"; c.chain.comps.push(k); }
@@ -249,7 +248,7 @@ onload();
 
 (async () => {
   const which = process.argv[3] || "shattered";
-  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain", led: "LED Pixel", diamond: "Diamond X-Ray", neon: "Neon", rays: "Light Rays", lens: "Lens Tube", eye: "Eye View", crtLines: "CRT Lines", crtTv: "CRT TV", wall: "Video Wall" }[which];
+  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain", led: "LED Pixel", diamond: "Diamond X-Ray", neon: "Neon", rays: "Light Rays", lens: "Lens Tube", crtLines: "CRT Lines", crtTv: "CRT TV", wall: "Video Wall" }[which];
   await clickLook(name);
   if (process.argv[4] === "twice") await clickLook(name);
   if (process.env.CTRL) {

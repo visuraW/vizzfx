@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.9.1";
+const VERSION = "1.10.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -78,12 +78,6 @@ Object.assign(LOOKS, {
     desc: "Through-the-lens ring and bokeh",
     signature: ["lensDistortion"],
     apply: (ctx) => applyLens(ctx),
-  },
-  eye: {
-    name: "Eye View",
-    desc: "Seen through a living eye",
-    signature: ["lensDistortion", "gaussian"],
-    apply: (ctx) => applyEye(ctx),
   },
   crtLines: {
     name: "CRT Lines",
@@ -1186,23 +1180,9 @@ async function applyLens({ project, sequence, item, opts, fps }) {
 }
 
 // ---------------------------------------------------------------------------
-// Eye View, CRT Lines, CRT TV, Video Wall
+// CRT Lines, CRT TV, Video Wall
 // ---------------------------------------------------------------------------
 const SCAN_MOGRT = "VizzFX_Scanlines.mogrt";
-const EYE_MOGRT = "VizzFX_Eye.mogrt";
-
-async function applyEye({ project, sequence, item, opts, fps }) {
-  await addEffects(project, item, ["lensDistortion", "gaussian", "lumetri"]);
-  const c = LOOK_CONTROLS.eye;
-  await configure(project, item, "lensDistortion", { curvature: -c.bulge });
-  await configure(project, item, "gaussian", { blurriness: c.blur, "repeat edge pixels": true });
-  await configure(project, item, "lumetri", { saturation: c.color, contrast: 30, blacks: -20 });
-  await addOverlay(project, sequence, item, opts, fps, EYE_MOGRT, "Eye", {
-    "pupil size": c.pupil, "pupil pulse": c.pulse, "fiber opacity": c.fibers, "rotation speed": c.rotation,
-  });
-  log("  eye view applied", "ok");
-  return true;
-}
 
 // Bold lines through the frame (like the "ENERGY" title).
 async function applyCrtLines({ project, sequence, item, opts, fps }) {
@@ -1295,22 +1275,6 @@ const CONTROL_DEFS = {
       apply: (x, v) => configure(x.project, x.item, "lensDistortion", { curvature: v }) },
     { id: "vignette", label: "Vignette", min: 0, max: 100, step: 1, value: 50,
       apply: (x, v) => configure(x.project, x.item, "lumetri", { amount: -v / 20 }) },
-  ],
-  eye: [
-    { id: "pupil", label: "Pupil size", min: 5, max: 80, step: 1, value: 30,
-      apply: (x, v) => setOverlayParam(x, "Pupil Size", v) },
-    { id: "pulse", label: "Breathing", min: 0, max: 40, step: 1, value: 8,
-      apply: (x, v) => setOverlayParam(x, "Pupil Pulse", v) },
-    { id: "fibers", label: "Iris fibers", min: 0, max: 100, step: 1, value: 60,
-      apply: (x, v) => setOverlayParam(x, "Fiber Opacity", v) },
-    { id: "rotation", label: "Iris spin", min: -30, max: 30, step: 1, value: 4,
-      apply: (x, v) => setOverlayParam(x, "Rotation Speed", v) },
-    { id: "color", label: "Color", min: 0, max: 150, step: 1, value: 0,
-      apply: (x, v) => configure(x.project, x.item, "lumetri", { saturation: v }) },
-    { id: "bulge", label: "Bulge", min: 0, max: 100, step: 1, value: 35,
-      apply: (x, v) => configure(x.project, x.item, "lensDistortion", { curvature: -v }) },
-    { id: "blur", label: "Blur", min: 0, max: 30, step: 0.5, value: 3,
-      apply: (x, v) => configure(x.project, x.item, "gaussian", { blurriness: v }) },
   ],
   crtLines: [
     { id: "lines", label: "Lines", min: 4, max: 200, step: 1, value: 40,

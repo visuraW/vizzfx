@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.10.0
+- Removed Eye View.
+
 ## 1.9.1
 - Eye template bundled: Eye View works fully.
 
