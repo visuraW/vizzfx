@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0
+- New looks: Low Shutter, Thermal, Tracking HUD.
+- Thermal LUT tuned to reference footage; After Effects script that builds the HUD template.
+- Prefers Legacy effects on Premiere 26 so settings apply reliably.
+
 ## 1.4.1
 - Responsive panel: cards reflow from 1 to 4 columns, rows wrap instead of overlapping, panel resizes down to 200px.
 

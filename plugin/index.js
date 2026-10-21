@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.4.1";
+const VERSION = "1.5.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -34,6 +34,29 @@ const LOOKS = {
   },
 };
 
+// Custom looks run `apply(ctx)` instead of the layered Ghost/Shattered pipeline.
+// `signature` = effects that mark a clip as already having the look.
+Object.assign(LOOKS, {
+  lowShutter: {
+    name: "Low Shutter",
+    desc: "Stepped 6 fps motion, soft smear, fade in",
+    signature: ["posterizeTime"],
+    apply: (ctx) => applyLowShutter(ctx),
+  },
+  thermal: {
+    name: "Thermal",
+    desc: "Heat-camera colors, grain, vignette",
+    signature: ["lumetri", "gaussian"],
+    apply: (ctx) => applyThermal(ctx),
+  },
+  hud: {
+    name: "Tracking HUD",
+    desc: "Editable sci-fi HUD over the clip",
+    signature: null,
+    apply: (ctx) => applyHud(ctx),
+  },
+});
+
 const LETTERBOX_CROP = 12.8; // % top and bottom: 16:9 -> ~2.39:1
 
 // key -> [display names to try, match names to try]. Names differ across
@@ -41,11 +64,12 @@ const LETTERBOX_CROP = 12.8; // % top and bottom: 16:9 -> ~2.39:1
 const EFFECTS = {
   echo: [["Echo", "Video Echo"], ["AE.ADBE Echo"]],
   lumetri: [["Lumetri Color"], ["AE.ADBE Lumetri"]],
-  dirBlur: [["Directional Blur", "Blur FX", "FI: Blur FX"], ["AE.ADBE Motion Blur"]],
-  noise: [["Noise", "Film Grain", "Grain"], ["AE.ADBE Noise"]],
+  dirBlur: [["Directional Blur (Legacy)", "Directional Blur"], ["AE.ADBE Motion Blur"]],
+  noise: [["Noise (Legacy)", "Noise"], ["AE.ADBE Noise2", "AE.ADBE Noise"]],
+  posterizeTime: [["Posterize Time"], ["AE.ADBE Posterize Time"]],
   crop: [["Crop"], ["AE.ADBE AECrop", "PR.ADBE Crop"]],
-  gaussian: [["Gaussian Blur"], ["AE.ADBE Gaussian Blur 2"]],
-  linearWipe: [["Linear Wipe"], ["AE.ADBE Linear Wipe"]],
+  gaussian: [["Gaussian Blur (Legacy)", "Gaussian Blur"], ["AE.ADBE Gaussian Blur 2"]],
+  linearWipe: [["Linear Wipe (Legacy)", "Linear Wipe"], ["AE.ADBE Linear Wipe"]],
   transform: [["Transform"], ["AE.ADBE Geometry2"]],
 };
 const effectLabel = (key) => EFFECTS[key][0][0];
@@ -79,7 +103,7 @@ function errText(e) {
   return (e && (e.message || e.toString())) || String(e);
 }
 
-const OPTION_IDS = ["opt-autoadd", "opt-glow", "opt-letterbox", "opt-drift", "opt-trails", "opt-delay", "opt-angle", "opt-echo-op", "opt-screen"];
+const OPTION_IDS = ["opt-fadein", "opt-autoadd", "opt-glow", "opt-letterbox", "opt-drift", "opt-trails", "opt-delay", "opt-angle", "opt-echo-op", "opt-screen"];
 
 function readOptions() {
   const num = (id, d) => {
@@ -89,6 +113,7 @@ function readOptions() {
   const on = (id) => !!document.getElementById(id).checked;
   return {
     autoAdd: on("opt-autoadd"),
+    fadeIn: on("opt-fadein"),
     glow: on("opt-glow"),
     letterbox: on("opt-letterbox"),
     drift: on("opt-drift"),
@@ -424,7 +449,7 @@ function removeItems(project, sequence, items, mediaType, label) {
 
 // --- Track planning --------------------------------------------------------
 // Most important first; dropped from the end when tracks run out.
-const LAYER_PRIORITY = ["slice", "trail1", "glow", "trail2"];
+const LAYER_PRIORITY = ["hud", "slice", "trail1", "glow", "trail2"];
 
 function buildLayers(look, opts, hasEcho, hasWipe, fps) {
   const layers = [];
@@ -525,11 +550,15 @@ async function confirmDialog(title, text, okLabel) {
   return res === "ok";
 }
 
-async function alreadyHasLook(item) {
-  const lum = await resolveEffect("lumetri");
-  const blur = await resolveEffect("dirBlur");
+async function alreadyHasLook(item, look) {
+  const keys = look.signature === undefined ? ["lumetri", "dirBlur"] : look.signature;
+  if (!keys || !keys.length) return false;
   const matches = (await listComponents(item)).map((c) => c.match);
-  return matches.includes(lum) && (!blur || matches.includes(blur));
+  for (const k of keys) {
+    const m = await resolveEffect(k);
+    if (m && !matches.includes(m)) return false;
+  }
+  return true;
 }
 
 // Ask before covering clips that already sit on tracks above.
@@ -681,6 +710,150 @@ async function addGlowLayer(project, sequence, item, look, opts, target, fps) {
   log(`  glow layer on V${target + 1}`, "ok");
 }
 
+// ---------------------------------------------------------------------------
+// Custom looks (from reference edits)
+// ---------------------------------------------------------------------------
+const THERMAL_LUT = "VizzFX_Thermal.cube";
+const HUD_MOGRT = "VizzFX_HUD.mogrt";
+
+async function pluginFile(rel) {
+  try {
+    const folder = await require("uxp").storage.localFileSystem.getPluginFolder();
+    return `${folder.nativePath}/${rel}`;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Fade from black at the clip start using Premiere's own Dip to Black transition.
+async function addDipFromBlack(project, item, seconds) {
+  try {
+    const names = await ppro.TransitionFactory.getVideoTransitionMatchNames();
+    const match = names.find((n) => /dip.*black/i.test(n));
+    if (!match) return log("  ? no Dip to Black transition found; skipped fade", "warn");
+    const transition = await ppro.TransitionFactory.createVideoTransition(match);
+    const options = ppro.AddTransitionOptions();
+    options.setApplyToStart(true);
+    options.setDuration(ppro.TickTime.createWithSeconds(seconds));
+    transact(project, "VizzFX: fade in", (ca) => ca.addAction(item.createAddVideoTransitionAction(transition, options)));
+    log(`  fade in from black (${seconds}s)`, "ok");
+  } catch (e) {
+    log(`  ! fade in skipped: ${errText(e)}`, "warn");
+  }
+}
+
+// Shot 1 of the reference: motion steps at 6 fps, frames soft and smeared, grain, fade up.
+async function applyLowShutter({ project, item, opts }) {
+  if (!(await resolveEffect("posterizeTime"))) throw new Error("Posterize Time is missing in this Premiere.");
+  await addEffects(project, item, ["posterizeTime", "gaussian", "dirBlur", "lumetri", "noise"]);
+  await configure(project, item, "posterizeTime", { "frame rate": 6 });
+  await configure(project, item, "gaussian", { blurriness: 4, "repeat edge pixels": true });
+  await configure(project, item, "dirBlur", { "direction|angle": 90, "blur length|length": 8 });
+  await configure(project, item, "lumetri", { contrast: 15, blacks: -15, saturation: 95 });
+  await configure(project, item, "noise", { "amount of noise|amount": 6, "noise type|use color noise": false });
+  if (opts.fadeIn) await addDipFromBlack(project, item, 0.4);
+  log("  low shutter applied", "ok");
+  return true;
+}
+
+// Shot 3: heat-camera palette through a LUT in Lumetri, softened, with grain and vignette.
+async function applyThermal({ project, item }) {
+  await addEffects(project, item, ["gaussian", "lumetri", "noise"]);
+  await configure(project, item, "gaussian", { blurriness: 3, "repeat edge pixels": true });
+  await configure(project, item, "noise", { "amount of noise|amount": 10, "noise type|use color noise": false });
+
+  const lut = await pluginFile(`luts/${THERMAL_LUT}`);
+  const lum = await findComponent(item, "lumetri");
+  let lutSet = false;
+  if (lum && lut) {
+    const p = findParam(lum.comp, "input lut|look");
+    if (p) {
+      try {
+        transact(project, "VizzFX: thermal LUT", (ca) => ca.addAction(p.createSetValueAction(p.createKeyframe(lut), true)));
+        // Only trust it if the value reads back as our file.
+        const kf = await p.getStartValue();
+        lutSet = String(kf && kf.value ? kf.value.value : kf).includes(THERMAL_LUT);
+      } catch (e) {
+        log(`  · LUT could not be set automatically: ${errText(e)}`, "warn");
+      }
+    }
+  }
+  if (lum) setParams(project, lum.comp, { amount: -1.4 }, "Vignette");
+  log("  thermal effects applied", "ok");
+
+  if (!lutSet) {
+    try {
+      await copyText(lut || THERMAL_LUT);
+    } catch (e) { /* clipboard unavailable */ }
+    log(`  LUT file: ${lut || THERMAL_LUT}`);
+    await confirmDialog(
+      "One step to finish Thermal",
+      "Premiere doesn't let plugins load a LUT, so pick it once by hand: Lumetri Color > Basic Correction > " +
+        "Input LUT > Browse, then choose VizzFX_Thermal.cube. Its full path is copied to your clipboard " +
+        "(on Mac, press Cmd+Shift+G in the file picker and paste). Then save the effects as a preset so you never repeat this.",
+      "OK"
+    );
+    LOOKS.thermal.doneMessage = "Thermal added. Pick the LUT in Lumetri to finish.";
+  }
+  return true;
+}
+
+// HUD: inserts the VizzFX HUD template on a free track above the clip, trimmed to the clip.
+async function hudPath() {
+  const bundled = await pluginFile(`mogrt/${HUD_MOGRT}`);
+  try {
+    if (bundled) {
+      require("fs").lstatSync(bundled);
+      return bundled;
+    }
+  } catch (e) { /* not bundled yet */ }
+  try {
+    const saved = localStorage.getItem("vizzfx-hud-path");
+    if (saved) return saved;
+  } catch (e) { /* no storage */ }
+  const pick = await confirmDialog(
+    "HUD template not found",
+    "Build it once in After Effects with after-effects/build-hud-mogrt.jsx (it exports VizzFX_HUD.mogrt to your Desktop), then pick that file.",
+    "Choose .mogrt file"
+  );
+  if (!pick) return null;
+  const file = await require("uxp").storage.localFileSystem.getFileForOpening({ types: ["mogrt"] });
+  if (!file) return null;
+  try {
+    localStorage.setItem("vizzfx-hud-path", file.nativePath);
+  } catch (e) { /* not remembered */ }
+  return file.nativePath;
+}
+
+async function applyHud({ project, sequence, item, opts, fps }) {
+  const layers = await prepareTracks(project, sequence, item, [{ id: "hud", kind: "hud", label: "HUD", offset: 0 }], opts, fps);
+  if (!layers || !layers.length) return false;
+  const path = await hudPath();
+  if (!path) return false;
+
+  const target = layers[0].target;
+  const start = await item.getStartTime();
+  const editor = ppro.SequenceEditor.getEditor(sequence);
+  let inserted = [];
+  try {
+    project.lockedAccess(() => {
+      inserted = editor.insertMogrtFromPath(path, start, target, 0) || [];
+    });
+  } catch (e) {
+    log(`  · insert under lock failed (${errText(e)}), retrying`, "warn");
+    inserted = editor.insertMogrtFromPath(path, start, target, 0) || [];
+  }
+  const hud = inserted.find((i) => i instanceof ppro.VideoClipTrackItem) || inserted[0];
+  if (!hud) throw new Error("Premiere didn't insert the HUD template.");
+  const end = await item.getEndTime();
+  transact(project, "VizzFX: trim HUD", (ca) => ca.addAction(hud.createSetEndAction(end)));
+  log(`  HUD on V${target + 1}`, "ok");
+  log("  Edit its text, box position and size in Window > Essential Graphics.");
+  log("  To track a face: keyframe Box Center (and Box Size) there.");
+  LOOKS.hud.doneMessage = "HUD added. Edit text and box in Essential Graphics.";
+  return true;
+}
+
 let busy = false;
 
 async function applyLook(lookKey) {
@@ -708,23 +881,27 @@ async function buildLook(lookKey) {
     if (!(await resolveEffect("lumetri"))) throw new Error("Lumetri Color is missing; it's required for the look.");
     const fps = await fpsOf(sequence);
 
-    const hasEcho = !!(await resolveEffect("echo"));
-    const hasWipe = !!(await resolveEffect("linearWipe"));
+    const hasEcho = look.apply ? false : !!(await resolveEffect("echo"));
+    const hasWipe = look.apply ? false : !!(await resolveEffect("linearWipe"));
     if (look.slices && !hasWipe) log("  slices need Linear Wipe; skipping the slice layer", "warn");
 
     let built = 0;
     for (const item of clips) {
       log(`- ${await nameOf(item)}`);
-      if (await alreadyHasLook(item)) {
+      if (await alreadyHasLook(item, look)) {
         const again = await confirmDialog(
           "Look already applied?",
-          `"${await nameOf(item)}" already has Lumetri Color and Directional Blur. Applying again stacks a second set of effects and layers.`,
+          `"${await nameOf(item)}" already looks like it has ${look.name}. Applying again stacks a second set of effects.`,
           "Apply again"
         );
         if (!again) {
           log("  skipped: already has the look", "warn");
           continue;
         }
+      }
+      if (look.apply) {
+        if (await look.apply({ project, sequence, item, opts, fps })) built++;
+        continue;
       }
       // Settle tracks first so nothing changes if the user cancels.
       const layers = await prepareTracks(project, sequence, item, buildLayers(look, opts, hasEcho, hasWipe, fps), opts, fps);
@@ -745,8 +922,10 @@ async function buildLook(lookKey) {
       return;
     }
     const skipped = Object.keys(resolved).filter((k) => !resolved[k]);
-    status(`${look.name} added.`, "ok");
+    status(look.doneMessage || `${look.name} added.`, "ok");
+    look.doneMessage = null;
     if (skipped.length) log(`  (this Premiere has no ${skipped.map(effectLabel).join(", ")})`);
+    if (look.apply) return;
     log("Done. Check in Effect Controls:", "ok");
     if (hasEcho) log("  Echo > Echo Operator = Blend.");
     if (opts.glow) log("  Glow layer > Opacity > Blend Mode = Screen.");

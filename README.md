@@ -4,7 +4,12 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 
 <img src="docs/panel-preview.png" width="340" alt="VizzFX panel">
 
-**Looks:** Ghost Trail (soft black and white, dreamy trails) and Shattered Light (blown-out black and white, diagonal glass slices). More are coming.
+**Looks**
+- Ghost Trail: soft black and white, dreamy trails
+- Shattered Light: blown-out black and white, diagonal glass slices
+- Low Shutter: stepped 6 fps motion with soft smear, fades in from black
+- Thermal: heat-camera colors
+- Tracking HUD: sci-fi HUD with editable text, keyframe the box to follow a face
 
 ## Install
 
@@ -19,6 +24,10 @@ Needs Premiere Pro 25.6 or newer.
 Select a clip on the timeline and click a look.
 
 VizzFX adds layers on free tracks above your clip, and adds tracks if it needs more. It asks before covering other clips. Cancel changes nothing, and Ctrl/Cmd+Z undoes everything.
+
+**Thermal:** Premiere doesn't let plugins load LUTs, so the first time, pick `VizzFX_Thermal.cube` in Lumetri Color > Basic Correction > Input LUT > Browse. VizzFX copies the file's path to your clipboard for you.
+
+**Tracking HUD:** build the template once in After Effects: File > Scripts > Run Script File > `after-effects/build-hud-mogrt.jsx`. It saves `VizzFX_HUD.mogrt` to your Desktop, and VizzFX asks for it the first time. Edit the text and box in Window > Essential Graphics.
 
 To reuse a look as a preset: select the effects in Effect Controls, right-click, and choose **Save Preset**.
 
