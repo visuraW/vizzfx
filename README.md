@@ -10,7 +10,7 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 
 Needs Premiere Pro 25.6 or newer.
 
-1. Download `VizzFX.ccx` from [Releases](https://github.com/visuraW/vizzfx/releases/latest).
+1. Download [VizzFX.ccx](https://github.com/visuraW/vizzfx/raw/main/dist/VizzFX.ccx).
 2. Double-click it and click Install.
 3. Restart Premiere and open **Window → UXP Plugins → VizzFX**.
 
