@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.1
+- Eye template bundled: Eye View works fully.
+
 ## 1.9.0
 - New looks: Eye View, CRT Lines, CRT TV, Video Wall.
 - Lens Tube template bundled.
