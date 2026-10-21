@@ -75,6 +75,27 @@ scripts/build.sh        zips plugin/ into dist/VizzFX.ccx
 - In real Premiere 26.3.2 the labels didn't stick (needs checking with the "labels didn't stick" log line). So Remove falls back to `LOOK_EFFECTS`: it removes the trailing run of the look's effect types, plus VizzFX layers above the clip (template clips named VizzFX…, and for Ghost/Shattered, copies of the clip). It always asks first.
 - Premiere has no API to switch an effect on or off, so Applied can only switch **layers** on and off; effects can only be removed.
 
+## NEXT: agreed plan (start here)
+
+The user approved this. Do it in this order.
+
+### 1. Adjustment-layer architecture (every look)
+Problem: effects go directly on the original clip. Premiere 26.3.2 doesn't keep VizzFX's instance-name labels, so Remove and Applied miss effects and leave some behind.
+
+What to build:
+- **Finding the adjustment layer.** The user creates one adjustment layer per project (File → New → Adjustment Layer). VizzFX finds it with `project.getRootItem()` → `FolderItem.getItems()`, searching recursively and casting with `ClipProjectItem.cast`. Match on the name "Adjustment Layer". To confirm a candidate, place it and check `VideoClipTrackItem.isAdjustmentLayer()`. If there's none, show a dialog explaining the one-time step.
+- **Placing it.** For each look, place it on the first free track above the clip with `SequenceEditor.createOverwriteItemAction(projectItem, clipStart, track, audioTrack)`, then trim it to the clip with `createSetEndAction`. All of the look's effects go on that layer. The original clip is never touched.
+- **Track order.** Ghost/Shattered: the copies (trails, slice, glow) stay as clip copies with no grading, and the adjustment layer goes **on top of them** so it grades the composite. Template overlays (Scanlines, LED grid, Lens Tube, HUD) go **above** the adjustment layer.
+- **Sliders.** In `applyControl`, resolve the target as the VizzFX adjustment layer above the selected clip whose effects match `LOOK_EFFECTS[look]`. If the user selected the adjustment layer itself, use it directly.
+- **Remove / Applied.** Identify looks by adjustment layers above the clip, using `isAdjustmentLayer()` and the effect recipe. Remove deletes the adjustment layer plus that look's templates and copies. Applied's on/off uses `createSetDisabledAction` on the adjustment layer and its layers, which gives a real per-look toggle.
+- Keep `findUnlabeled` only for clips made with versions before 1.12.
+- Update `tests/mock-premiere.js`: add project items, an "Adjustment Layer" item, `createOverwriteItemAction`, and `isAdjustmentLayer`.
+
+### 2. Template sliders don't reach the template in real Premiere
+CRT Lines at 600 looked the same as the default of 40, so `setParams` on the template (`AE.ADBE Capsule`) seems to have no effect. LED grid and Lens Tube sliders are probably affected too. Since 1.11.2 the log prints `template Lines: asked X, now Y`. Get that line from the user first.
+- If the value is rejected, ship several fixed versions of each template (e.g. Scanlines Fine about 300 lines, Medium about 150, Bold about 40) and pick one from the slider range. Fine-tuning then happens in Essential Graphics.
+- If the setting is found but has a different type or name, fix how the value is created.
+
 ## Open items
 
 1. **Labels:** find out why `createSetInstanceNameAction` / `createSetNameAction` don't stick in Premiere 26.3.2. The log line "labels didn't stick (transaction …, read back …)" shows what happened.
