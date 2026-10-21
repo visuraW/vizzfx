@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0
+- New looks: Neon (palette swatches + custom hue), Light Rays, Lens Tube.
+- LED Pixel goes up to 1080 rows.
+- When a slider can't find an effect setting, the log lists the setting names the effect has.
+- After Effects script for the Lens Tube template.
+
 ## 1.7.1
 - LED grid template bundled: LED Pixel now has gaps and subpixel lines.
 

@@ -12,6 +12,9 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 - Tracking HUD: sci-fi HUD with editable text, keyframe the box to follow a face
 - LED Pixel: pixel grid with RGB fringes and glow. Set how many pixel rows you want; works on vertical video too
 - Diamond X-Ray: black and white made of sparkling crystals, like an x-ray of diamonds
+- Neon: Vice City style glow. Pick a palette (Vice, Purple Haze, Cyber, Toxic, Sunset, Ice) or any hue
+- Light Rays: star rays and light shafts that come from the bright parts of the video. Choose how many rays
+- Lens Tube: shooting through a lens, with a blurry barrel ring and bokeh. Ring and bokeh are adjustable
 - Film Grain: fine monochrome grain. The Grain slider adjusts it live on the selected clips (and the grain in other looks)
 
 ## Install
@@ -32,7 +35,7 @@ VizzFX adds layers on free tracks above your clip, and adds tracks if it needs m
 
 **Tracking HUD:** edit the text, box position and size in Window > Essential Graphics. Keyframe Box Center to follow a face. (To change the HUD design, edit `after-effects/build-hud-mogrt.jsx` and re-export it from After Effects.)
 
-**Sliders:** after you click LED Pixel or Diamond X-Ray, its sliders appear under the cards. Moving one updates the selected clips live.
+**Sliders:** after you click a look (LED Pixel, Diamond X-Ray, Neon, Light Rays, Lens Tube), its sliders appear under the cards. Moving one updates the selected clips live.
 
 **LED grid:** the gaps and subpixel lines are a template placed above the clip. The Pixels and Gap sliders keep it lined up with the pixels. Fine-tune Gap Opacity and Subpixels in Window > Essential Graphics.
 

@@ -26,6 +26,10 @@ const CATALOG = {
   "AE.ADBE Brightness & Contrast 2": ["Brightness & Contrast", ["Brightness", "Contrast"]],
   "AE.ADBE Sharpen": ["Sharpen", ["Sharpen Amount"]],
   "AE.ADBE Capsule": ["VizzFX LED Grid", ["Rows", "Frame Width", "Frame Height", "Gap %", "Gap Opacity", "Subpixels"]],
+  "AE.ADBE Capsule Lens": ["VizzFX Lens Tube", ["Frame Width", "Frame Height", "Ring Size", "Ring Blur", "Bokeh Count", "Bokeh Size"]],
+  "AE.ADBE Tint": ["Tint", ["Map Black To", "Map White To", "Amount to Tint"]],
+  "AE.Impact_Volumetric_Rays_FX": ["Volumetric Rays", ["Center", "Exposure", "Decay"]],
+  "PR.ADBE Lens Distortion": ["Lens Distortion", ["Curvature", "Vertical Decentering", "Horizontal Decentering"]],
   "AE.ADBE Noise2": ["Noise (Legacy)", ["Amount of Noise", "Noise Type", "Clipping"]],
   "AE.ADBE_Noise_FX": ["Noise", ["Strength", "Size"]],
   "AE.ADBE Motion Blur": ["Directional Blur", ["Direction", "Blur Length"]],
@@ -52,7 +56,7 @@ class Param {
 class Component {
   constructor(match, params) { this.match = match; this.params = params || CATALOG[match][1].map((n) => new Param(n)); }
   async getMatchName() { return this.match; }
-  async getDisplayName() { return CATALOG[this.match][0]; }
+  async getDisplayName() { return (CATALOG[this.match] || CATALOG["AE.ADBE Capsule"])[0]; }
   getParamCount() { return this.params.length; }
   getParam(i) { return this.params[i]; }
   clone() { return new Component(this.match, this.params.map((p) => p.clone())); }
@@ -119,6 +123,7 @@ const project = {
 
 const ppro = {
   TickTime, VideoClipTrackItem, AudioClipTrackItem,
+  Color: class { constructor(r, g, b, a) { Object.assign(this, { r, g, b, a }); } toString() { return `rgb(${[this.r, this.g, this.b].map((v) => v.toFixed(2)).join(",")})`; } },
   Constants: { TrackItemType: { CLIP: 1 }, MediaType: { AUDIO: 3 } },
   Project: { getActiveProject: async () => project },
   VideoFilterFactory: {
@@ -146,6 +151,7 @@ const ppro = {
         const tr = vTracks[vIdx];
         const c = new VideoClipTrackItem(path.includes("LED") ? "VizzFX LED Grid" : "VizzFX HUD", tr, t.seconds, t.seconds + 10);
         if (path.includes("LED")) c.chain.comps.push(new Component("AE.ADBE Capsule"));
+        if (path.includes("Lens")) { const k = new Component("AE.ADBE Capsule Lens"); k.match = "AE.ADBE Capsule"; c.chain.comps.push(k); }
         tr.items.push(c);
         logLines.push(`MOGRT> ${path.split("/").slice(-2).join("/")} on V${vIdx + 1}`);
         return [c];
@@ -237,7 +243,7 @@ onload();
 
 (async () => {
   const which = process.argv[3] || "shattered";
-  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain", led: "LED Pixel", diamond: "Diamond X-Ray" }[which];
+  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain", led: "LED Pixel", diamond: "Diamond X-Ray", neon: "Neon", rays: "Light Rays", lens: "Lens Tube" }[which];
   await clickLook(name);
   if (process.argv[4] === "twice") await clickLook(name);
   if (process.env.CTRL) {
@@ -246,6 +252,10 @@ onload();
     const row = els.controls.children.find((r) => r.children && r.children.length && r.children[0].textContent === label);
     row.children[1].value = v;
     await row.children[1].handlers.change();
+  }
+  if (process.env.SWATCH) {
+    const row = els.controls.children.find((r) => r.className === "swatch-row");
+    await row.children[Number(process.env.SWATCH)].handlers.click();
   }
   if (process.env.SLIDE) {
     els["opt-grain"].value = process.env.SLIDE;
@@ -257,7 +267,7 @@ onload();
       process.stdout.write(`${label} ${it.name || "audio"} ${it.start.toFixed(2)}-${it.end.toFixed(2)}\n`);
       if (!it.chain) continue;
       for (const c of it.chain.comps) {
-        const vals = c.params.filter((p) => p.value !== 0 || p.keys.length).map((p) => `${p.displayName}=${p.value}${p.keys.length ? " keys" + JSON.stringify(p.keys) : ""}`);
+        const vals = c.params.filter((p) => p.value !== 0 || p.keys.length).map((p) => `${p.displayName}=${String(p.value)}${p.keys.length ? " keys" + JSON.stringify(p.keys) : ""}`);
         process.stdout.write(`   ${CATALOG[c.match][0]}: ${vals.join(", ")}\n`);
       }
     }

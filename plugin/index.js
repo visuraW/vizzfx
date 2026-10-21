@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.7.1";
+const VERSION = "1.8.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -61,6 +61,24 @@ Object.assign(LOOKS, {
     signature: ["blackWhite", "brightContrast"],
     apply: (ctx) => applyDiamond(ctx),
   },
+  neon: {
+    name: "Neon",
+    desc: "Vice City glow, pick a palette",
+    signature: ["tint", "wonderGlow"],
+    apply: (ctx) => applyNeon(ctx),
+  },
+  rays: {
+    name: "Light Rays",
+    desc: "Star rays from the bright parts",
+    signature: ["glint", "volumetricRays"],
+    apply: (ctx) => applyRays(ctx),
+  },
+  lens: {
+    name: "Lens Tube",
+    desc: "Through-the-lens ring and bokeh",
+    signature: ["lensDistortion"],
+    apply: (ctx) => applyLens(ctx),
+  },
   grain: {
     name: "Film Grain",
     desc: "Fine mono grain, adjustable",
@@ -96,6 +114,9 @@ const EFFECTS = {
   blackWhite: [["Black & White"], ["AE.ADBE Black & White"]],
   brightContrast: [["Brightness & Contrast"], ["AE.ADBE Brightness & Contrast 2"]],
   sharpen: [["Sharpen"], ["AE.ADBE Sharpen"]],
+  tint: [["Tint"], ["AE.ADBE Tint"]],
+  volumetricRays: [["Volumetric Rays"], ["AE.Impact_Volumetric_Rays_FX"]],
+  lensDistortion: [["Lens Distortion"], ["PR.ADBE Lens Distortion"]],
 };
 const effectLabel = (key) => EFFECTS[key][0][0];
 
@@ -359,7 +380,14 @@ function setParams(project, comp, values, label) {
   const targets = [];
   for (const [key, val] of Object.entries(values)) {
     const p = findParam(comp, key);
-    if (!p) log(`  ? ${label}: no "${key.split("|")[0]}" parameter`, "warn");
+    if (!p) {
+      const names = [];
+      for (let i = 0; i < comp.getParamCount(); i++) {
+        const n = (comp.getParam(i).displayName || "").trim();
+        if (n) names.push(n);
+      }
+      log(`  ? ${label}: no "${key.split("|")[0]}" parameter. It has: ${names.join(", ")}`, "warn");
+    }
     else targets.push([p, val]);
   }
   if (!targets.length) return;
@@ -1028,6 +1056,110 @@ async function applyDiamond({ project, item }) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Neon, Light Rays, Lens Tube
+// ---------------------------------------------------------------------------
+const LENS_MOGRT = "VizzFX_Lens_Tube.mogrt";
+
+// Neon palettes: shadows color -> highlight color (0-1 RGB).
+const NEON_PALETTES = [
+  { name: "Vice", dark: [0.02, 0.04, 0.3], bright: [1.0, 0.35, 0.85] },
+  { name: "Purple Haze", dark: [0.06, 0.0, 0.18], bright: [0.75, 0.4, 1.0] },
+  { name: "Cyber", dark: [0.0, 0.06, 0.14], bright: [0.2, 1.0, 0.95] },
+  { name: "Toxic", dark: [0.0, 0.1, 0.04], bright: [0.55, 1.0, 0.25] },
+  { name: "Sunset", dark: [0.18, 0.0, 0.25], bright: [1.0, 0.55, 0.2] },
+  { name: "Ice", dark: [0.0, 0.02, 0.2], bright: [0.6, 0.85, 1.0] },
+];
+
+function hsv(h, s, v) {
+  const f = (n) => {
+    const k = (n + h / 60) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return [f(5), f(3), f(1)];
+}
+
+// Custom hue: highlights in that neon color, shadows a deep version of the same hue.
+function neonColors(c) {
+  if (c.hue >= 0) return { dark: hsv(c.hue, 0.95, 0.2), bright: hsv(c.hue, 0.7, 1) };
+  const p = NEON_PALETTES[c.palette] || NEON_PALETTES[0];
+  return { dark: p.dark, bright: p.bright };
+}
+
+const color = (rgb) => new ppro.Color(rgb[0], rgb[1], rgb[2], 1);
+
+async function neonSetColors(project, item, c) {
+  const { dark, bright } = neonColors(c);
+  await configure(project, item, "tint", { "map black to": color(dark), "map white to": color(bright), "amount to tint": c.amount });
+}
+
+async function applyNeon({ project, item }) {
+  await addEffects(project, item, ["tint", "lumetri", "rgbSplit", "wonderGlow"]);
+  const c = LOOK_CONTROLS.neon;
+  await neonSetColors(project, item, c);
+  await configure(project, item, "lumetri", { exposure: -0.2, contrast: 40, blacks: -c.darkness, saturation: 140 });
+  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: 8 });
+  await configure(project, item, "wonderGlow", { [GLOW_PARAM]: c.glow });
+  log("  neon applied", "ok");
+  return true;
+}
+
+// Rays come from the clip's own highlights: Glint stars + Volumetric Rays shafts.
+const RAYS = {
+  count: "rays|points|number|count|streaks",
+  length: "length|size|scale",
+  threshold: "threshold|luma|brightness",
+  shaft: "intensity|exposure|strength|amount",
+  shaftLength: "length|distance|decay|size",
+};
+
+async function applyRays({ project, item }) {
+  await addEffects(project, item, ["lumetri", "glint", "volumetricRays"]);
+  const c = LOOK_CONTROLS.rays;
+  await configure(project, item, "lumetri", { contrast: 15, temperature: 8 });
+  await configure(project, item, "glint", { [RAYS.count]: c.count, [RAYS.length]: c.length, [RAYS.threshold]: c.threshold });
+  await configure(project, item, "volumetricRays", { [RAYS.shaft]: c.shaft, [RAYS.shaftLength]: c.shaftLength });
+  log("  light rays applied", "ok");
+  return true;
+}
+
+// Frame-fitted overlay template (same scheme as the LED grid): inserted above, told the
+// sequence frame size, and scaled to cover frames larger than its 1920 square comp.
+async function addOverlay(project, sequence, item, opts, fps, file, label, params) {
+  const path = await bundledFile(`mogrt/${file}`);
+  if (!path) {
+    log(`  ${label} template not installed yet (see after-effects/)`, "warn");
+    return null;
+  }
+  const layers = await prepareTracks(project, sequence, item, [{ id: "hud", kind: "overlay", label, offset: 0 }], opts, fps);
+  if (!layers || !layers.length) return null;
+  const clip = await insertTemplate(project, sequence, item, path, layers[0].target);
+  const frame = await frameSize(sequence);
+  const capsule = (await listComponents(clip)).find((x) => x.match === "AE.ADBE Capsule");
+  if (capsule) setParams(project, capsule.comp, { "frame width": frame.w, "frame height": frame.h, ...params }, label);
+  const scale = (Math.max(frame.w, frame.h) / 1920) * 100;
+  if (Math.abs(scale - 100) > 0.5) await configure(project, clip, "motion", { scale });
+  log(`  ${label} on V${layers[0].target + 1}`, "ok");
+  return clip;
+}
+
+async function setOverlayParam(x, name, value) {
+  const ov = await findOverlay(x.sequence, x.item, name);
+  if (ov) setParams(x.project, ov.comp, { [name.toLowerCase()]: value }, "overlay");
+}
+
+async function applyLens({ project, sequence, item, opts, fps }) {
+  await addEffects(project, item, ["lensDistortion", "lumetri"]);
+  const c = LOOK_CONTROLS.lens;
+  await configure(project, item, "lensDistortion", { curvature: c.curvature });
+  await configure(project, item, "lumetri", { amount: -c.vignette / 20, feather: 70 });
+  await addOverlay(project, sequence, item, opts, fps, LENS_MOGRT, "Lens tube", {
+    "ring size": c.ringSize, "ring blur": c.ringBlur, "bokeh count": c.bokehCount, "bokeh size": c.bokehSize,
+  });
+  log("  lens tube applied", "ok");
+  return true;
+}
+
 // Film Impact parameter names aren't documented; these try the likely ones.
 const SPLIT_PARAM = "amount|distance|offset|strength|split";
 const GLOW_PARAM = "intensity|amount|strength|glow";
@@ -1035,7 +1167,7 @@ const GLOW_PARAM = "intensity|amount|strength|glow";
 // Slider definitions per look. `apply` updates one selected clip.
 const CONTROL_DEFS = {
   led: [
-    { id: "pixels", label: "Pixels (rows)", min: 8, max: 240, step: 1, value: 54,
+    { id: "pixels", label: "Pixels (rows)", min: 8, max: 1080, step: 1, value: 54,
       apply: (x, v) => ledSetPixels(x.project, x.sequence, x.item, v) },
     { id: "gap", label: "Gap", min: 0, max: 60, step: 1, value: 18,
       apply: async (x, v) => {
@@ -1048,6 +1180,44 @@ const CONTROL_DEFS = {
       apply: (x, v) => configure(x.project, x.item, "wonderGlow", { [GLOW_PARAM]: v }) },
     { id: "saturation", label: "Saturation", min: 0, max: 200, step: 1, value: 130,
       apply: (x, v) => configure(x.project, x.item, "lumetri", { saturation: v }) },
+  ],
+  neon: [
+    { id: "palette", type: "palette", value: 0,
+      apply: (x, v) => neonSetColors(x.project, x.item, { ...LOOK_CONTROLS.neon, palette: v, hue: -1 }) },
+    { id: "hue", label: "Neon hue", min: -1, max: 360, step: 1, value: -1,
+      apply: (x, v) => neonSetColors(x.project, x.item, { ...LOOK_CONTROLS.neon, hue: v }) },
+    { id: "amount", label: "Tint amount", min: 0, max: 100, step: 1, value: 80,
+      apply: (x, v) => configure(x.project, x.item, "tint", { "amount to tint": v }) },
+    { id: "darkness", label: "Darkness", min: 0, max: 100, step: 1, value: 45,
+      apply: (x, v) => configure(x.project, x.item, "lumetri", { blacks: -v }) },
+    { id: "glow", label: "Glow", min: 0, max: 100, step: 1, value: 60,
+      apply: (x, v) => configure(x.project, x.item, "wonderGlow", { [GLOW_PARAM]: v }) },
+  ],
+  rays: [
+    { id: "count", label: "Rays", min: 2, max: 16, step: 1, value: 6,
+      apply: (x, v) => configure(x.project, x.item, "glint", { [RAYS.count]: v }) },
+    { id: "length", label: "Ray length", min: 0, max: 100, step: 1, value: 50,
+      apply: (x, v) => configure(x.project, x.item, "glint", { [RAYS.length]: v }) },
+    { id: "threshold", label: "Threshold", min: 0, max: 100, step: 1, value: 80,
+      apply: (x, v) => configure(x.project, x.item, "glint", { [RAYS.threshold]: v }) },
+    { id: "shaft", label: "Shafts", min: 0, max: 100, step: 1, value: 40,
+      apply: (x, v) => configure(x.project, x.item, "volumetricRays", { [RAYS.shaft]: v }) },
+    { id: "shaftLength", label: "Shaft length", min: 0, max: 100, step: 1, value: 50,
+      apply: (x, v) => configure(x.project, x.item, "volumetricRays", { [RAYS.shaftLength]: v }) },
+  ],
+  lens: [
+    { id: "ringSize", label: "Ring size", min: 60, max: 200, step: 1, value: 115,
+      apply: (x, v) => setOverlayParam(x, "Ring Size", v) },
+    { id: "ringBlur", label: "Ring blur", min: 0, max: 200, step: 1, value: 80,
+      apply: (x, v) => setOverlayParam(x, "Ring Blur", v) },
+    { id: "bokehCount", label: "Bokeh count", min: 0, max: 12, step: 1, value: 7,
+      apply: (x, v) => setOverlayParam(x, "Bokeh Count", v) },
+    { id: "bokehSize", label: "Bokeh size", min: 10, max: 200, step: 1, value: 60,
+      apply: (x, v) => setOverlayParam(x, "Bokeh Size", v) },
+    { id: "curvature", label: "Curvature", min: -100, max: 0, step: 1, value: -20,
+      apply: (x, v) => configure(x.project, x.item, "lensDistortion", { curvature: v }) },
+    { id: "vignette", label: "Vignette", min: 0, max: 100, step: 1, value: 50,
+      apply: (x, v) => configure(x.project, x.item, "lumetri", { amount: -v / 20 }) },
   ],
   diamond: [
     { id: "sparkle", label: "Sparkle", min: 0, max: 100, step: 1, value: 35,
@@ -1097,6 +1267,10 @@ function renderControls(lookKey) {
   title.textContent = `ADJUST ${LOOKS[lookKey].name.toUpperCase()}`;
   box.appendChild(title);
   for (const d of defs) {
+    if (d.type === "palette") {
+      box.appendChild(renderPalette(lookKey, d));
+      continue;
+    }
     const row = document.createElement("div");
     row.className = "slider-row";
     const label = document.createElement("span");
@@ -1126,12 +1300,40 @@ function renderControls(lookKey) {
   }
 }
 
+// One swatch per palette: a chip showing its shadow-to-highlight gradient.
+function renderPalette(lookKey, def) {
+  const row = document.createElement("div");
+  row.className = "swatch-row";
+  const css = (c) => `rgb(${c.map((v) => Math.round(v * 255)).join(",")})`;
+  NEON_PALETTES.forEach((p, i) => {
+    const chip = document.createElement("div");
+    chip.className = "swatch" + (LOOK_CONTROLS[lookKey].palette === i && LOOK_CONTROLS[lookKey].hue < 0 ? " active" : "");
+    chip.title = p.name;
+    chip.style.backgroundColor = css(p.bright); // fallback if gradients aren't supported
+    chip.style.background = `linear-gradient(135deg, ${css(p.dark)}, ${css(p.bright)})`;
+    const name = document.createElement("div");
+    name.className = "swatch-name";
+    name.textContent = p.name;
+    chip.appendChild(name);
+    chip.addEventListener("click", safe(async () => {
+      LOOK_CONTROLS[lookKey].palette = i;
+      LOOK_CONTROLS[lookKey].hue = -1;
+      saveControls();
+      renderControls(lookKey);
+      await applyControl(lookKey, { ...def, label: p.name }, i);
+    }));
+    row.appendChild(chip);
+  });
+  return row;
+}
+
 async function applyControl(lookKey, def, value) {
   const { project, sequence } = await getContext();
   const clips = await getSelectedVideoClips(sequence);
   if (!clips.length) return status(`${def.label}: ${value}. Select a clip with ${LOOKS[lookKey].name} to update it.`);
   for (const item of clips) await def.apply({ project, sequence, item }, value);
-  status(`${def.label}: ${value} on ${clips.length} clip${clips.length > 1 ? "s" : ""}.`, "ok");
+  const what = def.type === "palette" ? def.label : `${def.label}: ${value}`;
+  status(`${what} on ${clips.length} clip${clips.length > 1 ? "s" : ""}.`, "ok");
 }
 
 async function bundledFile(rel) {
