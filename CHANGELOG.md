@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.2
+- Thermal: "Save LUT file…" puts the LUT where you choose, instead of a hidden plugin path.
+
 ## 1.5.1
 - HUD template bundled: Tracking HUD works without After Effects.
 

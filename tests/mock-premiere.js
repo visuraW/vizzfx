@@ -205,11 +205,15 @@ const uxpMock = {
         getEntry: async (rel) => {
           const full = path.join(dir, rel);
           if (!require("fs").existsSync(full)) throw new Error("not found: " + rel);
-          return { nativePath: full };
+          return { nativePath: full, read: async () => require("fs").readFileSync(full, "utf8") };
         },
       };
     },
     getFileForOpening: async () => ({ nativePath: "/Users/me/Desktop/VizzFX_HUD.mogrt" }),
+    getFileForSaving: async (name) => ({
+      nativePath: "/Users/me/Documents/" + name,
+      write: async (d) => logLines.push(`SAVED> /Users/me/Documents/${name} (${d.length} bytes)`),
+    }),
   } },
 };
 Module._load = function (req, ...rest) {

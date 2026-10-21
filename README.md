@@ -25,7 +25,7 @@ Select a clip on the timeline and click a look.
 
 VizzFX adds layers on free tracks above your clip, and adds tracks if it needs more. It asks before covering other clips. Cancel changes nothing, and Ctrl/Cmd+Z undoes everything.
 
-**Thermal:** Premiere doesn't let plugins load LUTs, so the first time, pick `VizzFX_Thermal.cube` in Lumetri Color > Basic Correction > Input LUT > Browse. VizzFX copies the file's path to your clipboard for you.
+**Thermal:** Premiere doesn't let plugins load LUTs. The first time, VizzFX asks where to save `VizzFX_Thermal.cube` (or [download it](https://github.com/visuraW/vizzfx/raw/main/plugin/luts/VizzFX_Thermal.cube) with right-click > Save Link As). Then pick it in Lumetri Color > Basic Correction > Input LUT > Browse, and save the effects as a preset.
 
 **Tracking HUD:** edit the text, box position and size in Window > Essential Graphics. Keyframe Box Center to follow a face. (To change the HUD design, edit `after-effects/build-hud-mogrt.jsx` and re-export it from After Effects.)
 

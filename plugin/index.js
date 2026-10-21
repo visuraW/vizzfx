@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.5.1";
+const VERSION = "1.5.2";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -782,20 +782,46 @@ async function applyThermal({ project, item }) {
   log("  thermal effects applied", "ok");
 
   if (!lutSet) {
-    try {
-      await copyText(lut || THERMAL_LUT);
-    } catch (e) { /* clipboard unavailable */ }
-    log(`  LUT file: ${lut || THERMAL_LUT}`);
-    await confirmDialog(
-      "One step to finish Thermal",
-      "Premiere doesn't let plugins load a LUT, so pick it once by hand: Lumetri Color > Basic Correction > " +
-        "Input LUT > Browse, then choose VizzFX_Thermal.cube. Its full path is copied to your clipboard " +
-        "(on Mac, press Cmd+Shift+G in the file picker and paste). Then save the effects as a preset so you never repeat this.",
-      "OK"
-    );
-    LOOKS.thermal.doneMessage = "Thermal added. Pick the LUT in Lumetri to finish.";
+    const saved = await offerLutCopy();
+    LOOKS.thermal.doneMessage = saved
+      ? `Thermal added. Now pick ${THERMAL_LUT} in Lumetri > Input LUT > Browse.`
+      : "Thermal added. Pick the LUT in Lumetri to finish.";
   }
   return true;
+}
+
+// Premiere won't let plugins load a LUT, and the plugin's own folder is hidden,
+// so offer to save a copy of the LUT wherever the user likes, then they browse to it once.
+async function offerLutCopy() {
+  let known = null;
+  try {
+    known = localStorage.getItem("vizzfx-lut-path");
+  } catch (e) { /* no storage */ }
+  const text = known
+    ? `Premiere doesn't let plugins load a LUT. Pick it once: Lumetri Color > Basic Correction > Input LUT > Browse, ` +
+      `and choose ${known}. Then save the effects as a preset so you never repeat this.`
+    : "Premiere doesn't let plugins load a LUT, so this takes one manual step. Save the LUT file somewhere easy " +
+      "(like Documents), then pick it in Lumetri Color > Basic Correction > Input LUT > Browse. " +
+      "Afterwards, save the effects as a preset so you never repeat this.";
+  const go = await confirmDialog("One step to finish Thermal", text, known ? "OK" : "Save LUT file…");
+  if (!go || known) return !!known;
+  try {
+    const lfs = require("uxp").storage.localFileSystem;
+    const src = await (await lfs.getPluginFolder()).getEntry(`luts/${THERMAL_LUT}`);
+    const data = await src.read();
+    const dest = await lfs.getFileForSaving(THERMAL_LUT, { types: ["cube"] });
+    if (!dest) return false;
+    await dest.write(data);
+    const where = dest.nativePath || dest.name;
+    try {
+      localStorage.setItem("vizzfx-lut-path", where);
+    } catch (e) { /* not remembered */ }
+    log(`  LUT saved: ${where}`, "ok");
+    return true;
+  } catch (e) {
+    log(`  ! could not save the LUT: ${errText(e)}. Download it from github.com/visuraW/vizzfx (plugin/luts).`, "warn");
+    return false;
+  }
 }
 
 // HUD: inserts the VizzFX HUD template on a free track above the clip, trimmed to the clip.
