@@ -1,7 +1,7 @@
 {
   "id": "com.vizzfx.premiere",
   "name": "VizzFX",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "main": "index.html",
   "host": {
     "app": "premierepro",

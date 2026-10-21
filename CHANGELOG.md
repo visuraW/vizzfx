@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.2
+- CRT Lines and CRT TV go up to 600 lines.
+- Template sliders read their value back and log it, to confirm Premiere applies it.
+
 ## 1.11.1
 - Remove works even when Premiere doesn't keep VizzFX's labels. It matches the look's effects at the end of the stack plus VizzFX layers, and confirms first.
 - Scanlines template bundled: CRT Lines and CRT TV work fully.

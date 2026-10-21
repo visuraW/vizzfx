@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.11.1";
+const VERSION = "1.11.2";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -1221,9 +1221,23 @@ async function addOverlay(project, sequence, item, opts, fps, file, label, param
   return clip;
 }
 
+// Set a template control on the overlay above the clip, then read it back so the log shows
+// whether Premiere actually took the value.
 async function setOverlayParam(x, name, value) {
   const ov = await findOverlay(x.sequence, x.item, name);
-  if (ov) setParams(x.project, ov.comp, { [name.toLowerCase()]: value }, "overlay");
+  if (!ov) {
+    log(`  ? no VizzFX template with "${name}" above this clip (select the clip under it, not the template)`, "warn");
+    return;
+  }
+  setParams(x.project, ov.comp, { [name.toLowerCase()]: value }, "template");
+  try {
+    const p = findParam(ov.comp, name.toLowerCase());
+    const kf = await p.getStartValue();
+    const now = kf && kf.value !== undefined ? kf.value.value : kf;
+    log(`  template ${name}: asked ${value}, now ${JSON.stringify(now)}`, Number(now) === Number(value) ? "" : "warn");
+  } catch (e) {
+    log(`  template ${name}: set ${value} (couldn't read back: ${errText(e)})`);
+  }
 }
 
 async function applyLens({ project, sequence, item, opts, fps }) {
@@ -1342,7 +1356,7 @@ const CONTROL_DEFS = {
       apply: (x, v) => configure(x.project, x.item, "lumetri", { amount: -v / 20 }) },
   ],
   crtLines: [
-    { id: "lines", label: "Lines", min: 4, max: 200, step: 1, value: 40,
+    { id: "lines", label: "Lines", min: 4, max: 600, step: 1, value: 40,
       apply: (x, v) => setOverlayParam(x, "Lines", v) },
     { id: "thickness", label: "Thickness", min: 5, max: 90, step: 1, value: 45,
       apply: (x, v) => setOverlayParam(x, "Thickness %", v) },
@@ -1352,7 +1366,7 @@ const CONTROL_DEFS = {
       apply: (x, v) => setOverlayParam(x, "Roll Speed", v) },
   ],
   crtTv: [
-    { id: "lines", label: "Lines", min: 60, max: 540, step: 1, value: 270,
+    { id: "lines", label: "Lines", min: 60, max: 600, step: 1, value: 270,
       apply: (x, v) => setOverlayParam(x, "Lines", v) },
     { id: "opacity", label: "Line strength", min: 0, max: 100, step: 1, value: 40,
       apply: (x, v) => setOverlayParam(x, "Line Opacity", v) },
