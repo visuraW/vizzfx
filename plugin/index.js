@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.11.2";
+const VERSION = "1.11.3";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -1067,12 +1067,20 @@ function ledGrid(rows, frame) {
 
 // The grid overlay sitting above `item`: a template clip starting where the item starts.
 async function findOverlay(sequence, item, paramName) {
+  // The selected item may be the template itself.
+  for (const c of await listComponents(item)) {
+    if (c.match === "AE.ADBE Capsule" && findParam(c.comp, paramName)) return { item, comp: c.comp };
+  }
   const base = await item.getTrackIndex();
   const start = (await item.getStartTime()).seconds;
+  const end = (await item.getEndTime()).seconds;
   const n = await sequence.getVideoTrackCount();
   for (let t = base + 1; t < n; t++) {
     for (const it of await itemsOnTrack(await sequence.getVideoTrack(t))) {
-      if (Math.abs((await it.getStartTime()).seconds - start) > 0.05) continue;
+      // Any template overlapping the clip (Premiere may place it a frame off).
+      const s = (await it.getStartTime()).seconds;
+      const e = (await it.getEndTime()).seconds;
+      if (s >= end || e <= start) continue;
       for (const c of await listComponents(it)) {
         if (c.match === "AE.ADBE Capsule" && findParam(c.comp, paramName)) return { item: it, comp: c.comp };
       }

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.11.3
+- Template sliders (CRT lines, LED grid, Lens Tube) find the template when it merely overlaps the clip, or when the template itself is selected.
+
 ## 1.11.2
 - CRT Lines and CRT TV go up to 600 lines.
 - Template sliders read their value back and log it, to confirm Premiere applies it.

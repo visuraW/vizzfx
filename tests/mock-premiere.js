@@ -157,7 +157,8 @@ const ppro = {
       },
       insertMogrtFromPath: (path, t, vIdx) => {
         const tr = vTracks[vIdx];
-        const c = new VideoClipTrackItem(path.includes("LED") ? "VizzFX LED Grid" : "VizzFX HUD", tr, t.seconds, t.seconds + 10);
+        const late = process.env.LATE ? 1 / 24 : 0;
+        const c = new VideoClipTrackItem(path.includes("LED") ? "VizzFX LED Grid" : "VizzFX HUD", tr, t.seconds + late, t.seconds + 10);
         if (path.includes("LED")) c.chain.comps.push(new Component("AE.ADBE Capsule"));
         for (const [tag, key] of [["Scanlines", "AE.ADBE Capsule Scan"]]) {
           if (path.includes(tag)) { const k = new Component(key); k.match = "AE.ADBE Capsule"; c.chain.comps.push(k); }
