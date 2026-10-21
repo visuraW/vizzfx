@@ -1,0 +1,876 @@
+/** @type {import('@adobe/premierepro').premierepro} */
+const ppro = require("premierepro");
+
+const VERSION = "1.4.1";
+
+// ---------------------------------------------------------------------------
+// Look definitions. Param keys are effect parameter display names, matched
+// case-insensitively (exact, then prefix, then substring); "a|b" tries each.
+// ---------------------------------------------------------------------------
+const LOOKS = {
+  ghost: {
+    name: "Ghost Trail",
+    desc: "Soft high-key B&W, dreamy smears",
+    echo: { "echo time": -0.033, "number of echoes": 8, "starting intensity": 1, decay: 1 },
+    // Used when Echo isn't available (Premiere 26+): late copies stacked above.
+    trailLayers: [{ frames: 3, opacity: 45 }, { frames: 6, opacity: 25 }],
+    lumetri: { exposure: 1.0, contrast: -25, highlights: 40, shadows: 35, whites: 55, blacks: 45, saturation: 0 },
+    dirBlur: { "direction|angle": 55, "blur length|length|amount|strength": 18 },
+    noise: { "amount of noise|amount": 8, "noise type|use color noise": false },
+    glow: { blurriness: 70, opacity: 55 },
+    slices: null,
+  },
+  shattered: {
+    name: "Shattered Light",
+    desc: "Blown-out B&W, offset glass slices",
+    echo: { "echo time": -0.033, "number of echoes": 5, "starting intensity": 1, decay: 1 },
+    trailLayers: [{ frames: 3, opacity: 35 }],
+    lumetri: { exposure: 1.4, contrast: 60, highlights: 60, shadows: -45, whites: 80, blacks: -70, saturation: 0 },
+    dirBlur: { "direction|angle": 70, "blur length|length|amount|strength": 10 },
+    noise: { "amount of noise|amount": 12, "noise type|use color noise": false },
+    glow: { blurriness: 45, opacity: 75 },
+    // Band = region between two parallel Linear Wipes on a delayed, zoomed copy.
+    slices: { scale: 112, exposureShift: -0.3, edgeA: 30, edgeB: 62, feather: 2, drift: 18 },
+  },
+};
+
+const LETTERBOX_CROP = 12.8; // % top and bottom: 16:9 -> ~2.39:1
+
+// key -> [display names to try, match names to try]. Names differ across
+// Premiere versions (26.0 removed Echo and swapped some effects for Film Impact ones).
+const EFFECTS = {
+  echo: [["Echo", "Video Echo"], ["AE.ADBE Echo"]],
+  lumetri: [["Lumetri Color"], ["AE.ADBE Lumetri"]],
+  dirBlur: [["Directional Blur", "Blur FX", "FI: Blur FX"], ["AE.ADBE Motion Blur"]],
+  noise: [["Noise", "Film Grain", "Grain"], ["AE.ADBE Noise"]],
+  crop: [["Crop"], ["AE.ADBE AECrop", "PR.ADBE Crop"]],
+  gaussian: [["Gaussian Blur"], ["AE.ADBE Gaussian Blur 2"]],
+  linearWipe: [["Linear Wipe"], ["AE.ADBE Linear Wipe"]],
+  transform: [["Transform"], ["AE.ADBE Geometry2"]],
+};
+const effectLabel = (key) => EFFECTS[key][0][0];
+
+// ---------------------------------------------------------------------------
+// Logging, status, options
+// ---------------------------------------------------------------------------
+const logLines = [];
+
+function log(msg, cls) {
+  console.log(msg);
+  logLines.push(msg);
+  const el = document.getElementById("log");
+  if (!el) return;
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// One-line summary under the buttons: busy | ok | warn | err.
+function status(msg, cls) {
+  const el = document.getElementById("status");
+  if (!el) return;
+  el.className = `status ${cls || ""}`;
+  el.textContent = msg;
+}
+
+function errText(e) {
+  return (e && (e.message || e.toString())) || String(e);
+}
+
+const OPTION_IDS = ["opt-autoadd", "opt-glow", "opt-letterbox", "opt-drift", "opt-trails", "opt-delay", "opt-angle", "opt-echo-op", "opt-screen"];
+
+function readOptions() {
+  const num = (id, d) => {
+    const v = parseFloat(document.getElementById(id).value);
+    return isNaN(v) ? d : v;
+  };
+  const on = (id) => !!document.getElementById(id).checked;
+  return {
+    autoAdd: on("opt-autoadd"),
+    glow: on("opt-glow"),
+    letterbox: on("opt-letterbox"),
+    drift: on("opt-drift"),
+    trails: on("opt-trails"),
+    delayFrames: Math.max(0, Math.round(num("opt-delay", 8))),
+    angle: num("opt-angle", 17),
+    echoOperator: num("opt-echo-op", 7),
+    screenBlend: num("opt-screen", 8),
+  };
+}
+
+function saveOptions() {
+  try {
+    const o = {};
+    for (const id of OPTION_IDS) {
+      const el = document.getElementById(id);
+      o[id] = el.tagName.toLowerCase() === "sp-checkbox" ? !!el.checked : el.value;
+    }
+    localStorage.setItem("vizzfx-options", JSON.stringify(o));
+  } catch (e) { /* storage unavailable: defaults are fine */ }
+}
+
+function loadOptions() {
+  try {
+    const o = JSON.parse(localStorage.getItem("vizzfx-options") || "{}");
+    for (const id of OPTION_IDS) {
+      if (!(id in o)) continue;
+      const el = document.getElementById(id);
+      if (el.tagName.toLowerCase() === "sp-checkbox") el.checked = !!o[id];
+      else el.value = o[id];
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// Premiere helpers
+// ---------------------------------------------------------------------------
+async function getContext() {
+  const project = await ppro.Project.getActiveProject();
+  if (!project) throw new Error("Open a project first.");
+  const sequence = await project.getActiveSequence();
+  if (!sequence) throw new Error("Open a sequence first.");
+  return { project, sequence };
+}
+
+async function getSelectedVideoClips(sequence) {
+  const selection = await sequence.getSelection();
+  const items = await selection.getTrackItems();
+  let video = items.filter((i) => i instanceof ppro.VideoClipTrackItem);
+  if (!video.length) {
+    // Fallback when instanceof doesn't work across the API boundary.
+    for (const i of items) {
+      try {
+        if ((await i.getMediaType()) === ppro.Constants.MediaType.VIDEO) video.push(i);
+      } catch (e) { /* not a clip */ }
+    }
+  }
+  log(`  selection: ${items.length} item(s), ${video.length} video`);
+  return video;
+}
+
+// One undoable step. Returns true on success.
+function transact(project, label, build) {
+  let ok = false;
+  project.lockedAccess(() => {
+    ok = project.executeTransaction((compoundAction) => build(compoundAction), label);
+  });
+  return ok;
+}
+
+const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+let effectList = null;
+async function getEffectList() {
+  if (!effectList) {
+    const matches = await ppro.VideoFilterFactory.getMatchNames();
+    const displays = await ppro.VideoFilterFactory.getDisplayNames();
+    effectList = { matches, displays };
+  }
+  return effectList;
+}
+
+// Match name for an effect key, or null if this Premiere doesn't have it.
+const resolved = {};
+async function resolveEffect(key) {
+  if (key in resolved) return resolved[key];
+  const [displayNames, candidates] = EFFECTS[key];
+  const { matches, displays } = await getEffectList();
+  let found = null;
+  for (const c of candidates) {
+    const i = matches.findIndex((m) => norm(m) === norm(c));
+    if (i >= 0) { found = matches[i]; break; }
+  }
+  if (!found) {
+    for (const d of displayNames) {
+      const i = displays.findIndex((x) => norm(x) === norm(d));
+      if (i >= 0 && matches[i]) { found = matches[i]; break; }
+    }
+  }
+  if (!found) {
+    // Loose: a match name that ends with the effect's name, e.g. "XX.Vendor Directional Blur".
+    for (const d of displayNames) {
+      const i = matches.findIndex((m) => norm(m).endsWith(norm(d)));
+      if (i >= 0) { found = matches[i]; break; }
+    }
+  }
+  resolved[key] = found;
+  if (found) log(`  ${effectLabel(key)} → ${found}`);
+  else log(`  ${effectLabel(key)}: not in this Premiere, skipped`, "warn");
+  return found;
+}
+
+async function listComponents(item) {
+  const chain = await item.getComponentChain();
+  const n = chain.getComponentCount();
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const comp = chain.getComponentAtIndex(i);
+    out.push({ comp, index: i, match: await comp.getMatchName(), name: await comp.getDisplayName() });
+  }
+  return out;
+}
+
+// Last component of this kind on the clip (the one just added), or null.
+async function findComponent(item, key) {
+  const match = key === "opacity" ? null : await resolveEffect(key);
+  if (key !== "opacity" && !match) return null;
+  const comps = await listComponents(item);
+  for (let i = comps.length - 1; i >= 0; i--) {
+    const c = comps[i];
+    if (match ? c.match === match : c.match === "AE.ADBE Opacity" || c.name.toLowerCase() === "opacity") return c;
+  }
+  return null;
+}
+
+async function findComponents(item, key) {
+  const match = await resolveEffect(key);
+  if (!match) return [];
+  return (await listComponents(item)).filter((c) => c.match === match);
+}
+
+// Insert available effects at `atIndex` (default: end of chain), in order.
+// Tries insert, append, then one-by-one; throws with Premiere's error if all fail.
+async function addEffects(project, item, keys, atIndex) {
+  const available = [];
+  for (const k of keys) if (await resolveEffect(k)) available.push(k);
+  if (!available.length) return [];
+  const label = available.map(effectLabel).join(", ");
+  log(`  adding ${label}`);
+
+  const attempts = [
+    ["insert", (chain, comps) => {
+      let i = atIndex === undefined ? chain.getComponentCount() : atIndex;
+      return (ca) => { for (const c of comps) ca.addAction(chain.createInsertComponentAction(c, i++)); };
+    }],
+  ];
+  if (atIndex === undefined) {
+    attempts.push(["append", (chain, comps) => (ca) => {
+      for (const c of comps) ca.addAction(chain.createAppendComponentAction(c));
+    }]);
+  }
+  let lastErr = null;
+  for (const [how, makeBuild] of attempts) {
+    try {
+      const chain = await item.getComponentChain();
+      const comps = [];
+      for (const k of available) comps.push(await ppro.VideoFilterFactory.createComponent(await resolveEffect(k)));
+      if (transact(project, `VizzFX: add ${label}`, makeBuild(chain, comps))) return available;
+      lastErr = new Error("Premiere returned false");
+    } catch (e) {
+      lastErr = e;
+    }
+    log(`  · ${how} failed: ${errText(lastErr)}`, "warn");
+  }
+  if (atIndex === undefined && available.length > 1) {
+    try {
+      for (const k of available) {
+        const chain = await item.getComponentChain();
+        const comp = await ppro.VideoFilterFactory.createComponent(await resolveEffect(k));
+        const ok = transact(project, `VizzFX: add ${effectLabel(k)}`, (ca) =>
+          ca.addAction(chain.createInsertComponentAction(comp, chain.getComponentCount())));
+        if (!ok) throw new Error("Premiere returned false");
+      }
+      return available;
+    } catch (e) {
+      lastErr = e;
+      log(`  · one-by-one failed: ${errText(lastErr)}`, "warn");
+    }
+  }
+  throw new Error(`Could not add ${label}: ${errText(lastErr)}`);
+}
+
+function findParam(comp, key) {
+  if (key.includes("|")) {
+    for (const alt of key.split("|")) {
+      const p = findParam(comp, alt);
+      if (p) return p;
+    }
+    return null;
+  }
+  const k = key.toLowerCase();
+  const params = [];
+  for (let i = 0; i < comp.getParamCount(); i++) params.push(comp.getParam(i));
+  const name = (p) => (p.displayName || "").toLowerCase().trim();
+  return (
+    params.find((p) => name(p) === k) ||
+    params.find((p) => name(p).startsWith(k)) ||
+    params.find((p) => name(p).includes(k)) ||
+    null
+  );
+}
+
+// Set static values; one undo step, falling back param-by-param.
+function setParams(project, comp, values, label) {
+  const targets = [];
+  for (const [key, val] of Object.entries(values)) {
+    const p = findParam(comp, key);
+    if (!p) log(`  ? ${label}: no "${key.split("|")[0]}" parameter`, "warn");
+    else targets.push([p, val]);
+  }
+  if (!targets.length) return;
+  try {
+    const ok = transact(project, `VizzFX: ${label}`, (ca) => {
+      for (const [p, v] of targets) ca.addAction(p.createSetValueAction(p.createKeyframe(v), true));
+    });
+    if (ok) return;
+  } catch (e) { /* retry individually below */ }
+  for (const [p, v] of targets) {
+    try {
+      transact(project, `VizzFX: ${p.displayName}`, (ca) => ca.addAction(p.createSetTimeVaryingAction(false)));
+      const ok = transact(project, `VizzFX: ${p.displayName}`, (ca) =>
+        ca.addAction(p.createSetValueAction(p.createKeyframe(v), true)));
+      if (!ok) log(`  ! ${label}: could not set ${p.displayName}`, "warn");
+    } catch (e) {
+      log(`  ! ${label}: ${p.displayName}: ${errText(e)}`, "warn");
+    }
+  }
+}
+
+// Set params on the effect of this kind if the clip has it.
+async function configure(project, item, key, values, label) {
+  const c = await findComponent(item, key);
+  if (c) setParams(project, c.comp, values, label || (key === "opacity" ? "Opacity" : effectLabel(key)));
+  return !!c;
+}
+
+// Two keyframes from clip start to clip end (clip-relative media time).
+async function animateParam(project, item, comp, key, from, to, label) {
+  const p = findParam(comp, key);
+  if (!p) return log(`  ? ${label}: no "${key}" parameter`, "warn");
+  const inPoint = await item.getInPoint();
+  const dur = await item.getDuration();
+  try {
+    transact(project, `VizzFX: animate ${label}`, (ca) => ca.addAction(p.createSetTimeVaryingAction(true)));
+    transact(project, `VizzFX: animate ${label}`, (ca) => {
+      const k1 = p.createKeyframe(from);
+      k1.position = inPoint;
+      const k2 = p.createKeyframe(to);
+      k2.position = inPoint.add(dur);
+      ca.addAction(p.createAddKeyframeAction(k1));
+      ca.addAction(p.createAddKeyframeAction(k2));
+    });
+  } catch (e) {
+    log(`  ! could not animate ${label}: ${errText(e)}`, "warn");
+  }
+}
+
+async function fpsOf(sequence) {
+  try {
+    const ticksPerFrame = Number(await sequence.getTimebase());
+    if (ticksPerFrame > 0) return 254016000000 / ticksPerFrame;
+  } catch (e) { /* fall through */ }
+  return 30;
+}
+
+async function itemsOnTrack(track) {
+  return await track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false);
+}
+
+async function nameOf(item) {
+  try {
+    return await item.getName();
+  } catch (e) {
+    return "clip";
+  }
+}
+
+// Names of clips on `track` overlapping [start, end] seconds.
+async function clipsInRange(track, start, end) {
+  const names = [];
+  for (const it of await itemsOnTrack(track)) {
+    const s = (await it.getStartTime()).seconds;
+    const e = (await it.getEndTime()).seconds;
+    if (s < end - 1e-6 && e > start + 1e-6) names.push(await nameOf(it));
+  }
+  return names;
+}
+
+// "kind:trackIndex:startTicks" for every clip, to spot items an action created.
+async function snapshot(sequence, kind) {
+  const keys = new Set();
+  const video = kind === "video";
+  const n = video ? await sequence.getVideoTrackCount() : await sequence.getAudioTrackCount();
+  for (let t = 0; t < n; t++) {
+    const track = video ? await sequence.getVideoTrack(t) : await sequence.getAudioTrack(t);
+    for (const it of await itemsOnTrack(track)) keys.add(`${t}:${(await it.getStartTime()).ticks}`);
+  }
+  return keys;
+}
+
+async function newItems(sequence, kind, before, start, fps) {
+  const out = [];
+  const video = kind === "video";
+  const n = video ? await sequence.getVideoTrackCount() : await sequence.getAudioTrackCount();
+  for (let t = 0; t < n; t++) {
+    const track = video ? await sequence.getVideoTrack(t) : await sequence.getAudioTrack(t);
+    for (const it of await itemsOnTrack(track)) {
+      const st = await it.getStartTime();
+      if (!before.has(`${t}:${st.ticks}`) && Math.abs(st.seconds - start) < 0.5 / fps) out.push({ item: it, track: t });
+    }
+  }
+  return out;
+}
+
+function removeItems(project, sequence, items, mediaType, label) {
+  if (!items.length) return;
+  const editor = ppro.SequenceEditor.getEditor(sequence);
+  ppro.TrackItemSelection.createEmptySelection((sel) => {
+    for (const it of items) sel.addItem(it);
+    transact(project, label, (ca) => ca.addAction(editor.createRemoveItemsAction(sel, false, mediaType, false)));
+  });
+}
+
+// --- Track planning --------------------------------------------------------
+// Most important first; dropped from the end when tracks run out.
+const LAYER_PRIORITY = ["slice", "trail1", "glow", "trail2"];
+
+function buildLayers(look, opts, hasEcho, hasWipe, fps) {
+  const layers = [];
+  if (!hasEcho && opts.trails) {
+    look.trailLayers.forEach((layer, i) =>
+      layers.push({ id: `trail${i + 1}`, kind: "trail", label: `trail ${i + 1}`, layer, offset: layer.frames / fps }));
+  }
+  if (look.slices && hasWipe) layers.push({ id: "slice", kind: "slice", label: "slices", offset: opts.delayFrames / fps });
+  if (opts.glow) layers.push({ id: "glow", kind: "glow", label: "glow", offset: 0 });
+  return layers;
+}
+
+// Give each layer (bottom to top) the next track above the clip that is empty
+// over the clip's time range; tracks with other clips are skipped.
+async function assignTracks(sequence, item, layers) {
+  const base = await item.getTrackIndex();
+  const count = await sequence.getVideoTrackCount();
+  const start = (await item.getStartTime()).seconds;
+  const end = (await item.getEndTime()).seconds;
+  const busy = [];
+  let t = base + 1;
+  for (const l of layers) {
+    l.target = null;
+    while (t < count) {
+      const names = await clipsInRange(await sequence.getVideoTrack(t), start, end + l.offset);
+      if (!names.length) {
+        l.target = t++;
+        break;
+      }
+      busy.push({ index: t, names });
+      t++;
+    }
+  }
+  const missing = layers.filter((l) => l.target === null);
+  const top = Math.max(-1, ...layers.filter((l) => l.target !== null).map((l) => l.target));
+  // Busy tracks end up under (and covered by) our layers.
+  const covered = missing.length ? busy : busy.filter((b) => b.index < top);
+  return { base, count, start, end, missing, covered };
+}
+
+// --- Experimental: add a track by duplicating onto the slot above the top track.
+let hostVersion = "";
+
+function autoAddKnown() {
+  try {
+    const s = JSON.parse(localStorage.getItem("vizzfx-autoadd") || "null");
+    return s && s.host === hostVersion ? s.ok : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function rememberAutoAdd(ok) {
+  try {
+    localStorage.setItem("vizzfx-autoadd", JSON.stringify({ host: hostVersion, ok }));
+  } catch (e) { /* not remembered: probe again next time */ }
+}
+
+// Returns true if a new empty video track now exists at the top.
+async function tryAddTrack(project, sequence, item, fps) {
+  const count = await sequence.getVideoTrackCount();
+  const base = await item.getTrackIndex();
+  const start = (await item.getStartTime()).seconds;
+  const end = (await item.getEndTime()).seconds;
+  // If Premiere drops the copy onto an existing track instead, it must land on empty space.
+  if ((await clipsInRange(await sequence.getVideoTrack(count - 1), start, end)).length) {
+    log(`  auto-add skipped: top track V${count} has clips here`, "warn");
+    return false;
+  }
+  const videoBefore = await snapshot(sequence, "video");
+  const audioBefore = await snapshot(sequence, "audio");
+  const editor = ppro.SequenceEditor.getEditor(sequence);
+  let err = null;
+  try {
+    transact(project, "VizzFX: add track", (ca) =>
+      ca.addAction(editor.createCloneTrackItemAction(item, ppro.TickTime.createWithSeconds(0), count - base, 1, true, false)));
+  } catch (e) {
+    err = e;
+  }
+  // Remove the probe copy (and any linked audio); a newly created track stays.
+  removeItems(project, sequence, (await newItems(sequence, "video", videoBefore, start, fps)).map((x) => x.item),
+    ppro.Constants.MediaType.VIDEO, "VizzFX: remove probe");
+  removeItems(project, sequence, (await newItems(sequence, "audio", audioBefore, start, fps)).map((x) => x.item),
+    ppro.Constants.MediaType.AUDIO, "VizzFX: remove probe audio");
+  const added = (await sequence.getVideoTrackCount()) > count;
+  rememberAutoAdd(added);
+  log(added ? `  added track V${count + 1}` : `  auto-add not supported${err ? `: ${errText(err)}` : ""}`, added ? "ok" : "warn");
+  return added;
+}
+
+// --- Dialog ----------------------------------------------------------------
+async function confirmDialog(title, text, okLabel) {
+  const dlg = document.getElementById("confirm");
+  document.getElementById("confirm-title").textContent = title;
+  document.getElementById("confirm-text").textContent = text;
+  document.getElementById("confirm-ok").textContent = okLabel;
+  const res = await dlg.uxpShowModal({ title: "VizzFX", resize: "none", size: { width: 400, height: 260 } });
+  return res === "ok";
+}
+
+async function alreadyHasLook(item) {
+  const lum = await resolveEffect("lumetri");
+  const blur = await resolveEffect("dirBlur");
+  const matches = (await listComponents(item)).map((c) => c.match);
+  return matches.includes(lum) && (!blur || matches.includes(blur));
+}
+
+// Ask before covering clips that already sit on tracks above.
+async function confirmCovered(plan, layers) {
+  const list = plan.covered.map((b) => `V${b.index + 1} (${b.names.slice(0, 2).join(", ")})`).join(", ");
+  const many = plan.covered.length > 1;
+  const where = layers.every((l) => l.target !== null)
+    ? ` (on ${layers.map((l) => `V${l.target + 1}`).join(", ")})`
+    : "";
+  return confirmDialog(
+    "Tracks above are in use",
+    `${list} already ${many ? "have" : "has"} clips over this part of the timeline. ` +
+      `The FX layers will be placed above ${many ? "them" : "it"}${where} and will cover ${many ? "them" : "it"}.`,
+    "Continue"
+  );
+}
+
+// Make sure every layer has a track; returns layers to build, or null if cancelled.
+// Questions come before any change, so Cancel leaves the timeline untouched.
+async function prepareTracks(project, sequence, item, layers, opts, fps) {
+  let plan = await assignTracks(sequence, item, layers);
+  let askedCovered = false;
+  if (plan.covered.length) {
+    if (!(await confirmCovered(plan, layers))) return null;
+    askedCovered = true;
+  }
+
+  if (plan.missing.length) {
+    const byPriority = [...layers].sort((a, b) => LAYER_PRIORITY.indexOf(a.id) - LAYER_PRIORITY.indexOf(b.id));
+    const drop = byPriority.slice(layers.length - plan.missing.length);
+    const free = layers.length - plan.missing.length;
+    const n = plan.missing.length;
+    const message = (why) =>
+      `This look uses ${layers.length} layers above the clip, but only ${free} free track${free === 1 ? " is" : "s are"} available. ` +
+      `${why}Add ${n} video track${n > 1 ? "s" : ""} (right-click a track header > Add Tracks), ` +
+      `or build now without: ${drop.map((l) => l.label).join(", ")}.`;
+    const dropLabel = `Build without ${drop.map((l) => l.label).join(", ")}`;
+
+    let added = false;
+    if (opts.autoAdd && autoAddKnown() !== false) {
+      // The probe adds nothing when it fails, and only empty tracks when it works.
+      for (let i = 0; i < n; i++) {
+        if (!(await tryAddTrack(project, sequence, item, fps))) break;
+      }
+      plan = await assignTracks(sequence, item, layers);
+      added = !plan.missing.length;
+    }
+    if (!added) {
+      const why = opts.autoAdd && autoAddKnown() === false ? "This Premiere doesn't let plugins add tracks. " : "";
+      if (!(await confirmDialog("Not enough video tracks", message(why), dropLabel))) return null;
+      layers = layers.filter((l) => !drop.includes(l));
+      plan = await assignTracks(sequence, item, layers);
+    }
+  }
+
+  if (plan.covered.length && !askedCovered && !(await confirmCovered(plan, layers))) return null;
+  return layers;
+}
+
+// Duplicate `item` onto video track `target`, `offsetSec` later, trimmed to the original end.
+async function cloneTo(project, sequence, item, target, offsetSec, fps) {
+  const base = await item.getTrackIndex();
+  const start = (await item.getStartTime()).seconds + offsetSec;
+  const track = await sequence.getVideoTrack(target);
+  const end = (await item.getEndTime()).seconds;
+  if ((await clipsInRange(track, start - offsetSec, end + offsetSec)).length) {
+    throw new Error(`V${target + 1} is no longer empty here.`);
+  }
+
+  const audioBefore = await snapshot(sequence, "audio");
+  const editor = ppro.SequenceEditor.getEditor(sequence);
+  // Audio offset fixed at 1: any duplicated linked audio is removed below.
+  const ok = transact(project, "VizzFX: duplicate layer", (ca) => {
+    ca.addAction(editor.createCloneTrackItemAction(item, ppro.TickTime.createWithSeconds(offsetSec), target - base, 1, true, false));
+  });
+  if (!ok) throw new Error("Premiere refused to duplicate the clip.");
+
+  let clone = null;
+  for (const it of await itemsOnTrack(track)) {
+    if (Math.abs((await it.getStartTime()).seconds - start) < 0.5 / fps) clone = it;
+  }
+  if (!clone) throw new Error(`Duplicated clip not found on V${target + 1}.`);
+
+  if (offsetSec > 0) {
+    const endTime = await item.getEndTime();
+    transact(project, "VizzFX: trim layer", (ca) => ca.addAction(clone.createSetEndAction(endTime)));
+  }
+  try {
+    removeItems(project, sequence, (await newItems(sequence, "audio", audioBefore, start, fps)).map((x) => x.item),
+      ppro.Constants.MediaType.AUDIO, "VizzFX: remove duplicate audio");
+  } catch (e) {
+    log("  ! a duplicate audio clip may remain on an audio track; delete it by hand.", "warn");
+  }
+  return clone;
+}
+
+// ---------------------------------------------------------------------------
+// Looks
+// ---------------------------------------------------------------------------
+async function applyBaseLook(project, item, look, opts, hasEcho) {
+  const keys = hasEcho ? ["echo", "lumetri", "dirBlur", "noise"] : ["lumetri", "dirBlur", "noise"];
+  if (opts.letterbox) keys.push("crop");
+  await addEffects(project, item, keys);
+
+  if (hasEcho) await configure(project, item, "echo", { ...look.echo, "echo operator": opts.echoOperator });
+  await configure(project, item, "lumetri", look.lumetri);
+  await configure(project, item, "dirBlur", look.dirBlur);
+  await configure(project, item, "noise", look.noise);
+  if (opts.letterbox) await configure(project, item, "crop", { top: LETTERBOX_CROP, bottom: LETTERBOX_CROP });
+  log("  base look applied", "ok");
+}
+
+// Echo replacement: late copies with reduced opacity blend into ghost trails.
+async function addTrailLayer(project, sequence, item, layer, target, fps) {
+  const clone = await cloneTo(project, sequence, item, target, layer.frames / fps, fps);
+  await configure(project, clone, "opacity", { opacity: layer.opacity });
+  log(`  trail layer on V${target + 1} (${layer.frames} frames late, ${layer.opacity}%)`, "ok");
+}
+
+async function addSliceLayer(project, sequence, item, look, opts, target, fps) {
+  const s = look.slices;
+  const clone = await cloneTo(project, sequence, item, target, opts.delayFrames / fps, fps);
+
+  // Zoom before the look's own effects so the letterbox stays put.
+  const lum = (await findComponents(clone, "lumetri"))[0];
+  await addEffects(project, clone, ["transform"], lum ? lum.index : undefined);
+  await configure(project, clone, "transform", { scale: s.scale });
+  await configure(project, clone, "lumetri", { exposure: look.lumetri.exposure + s.exposureShift }, "Slice tone");
+
+  // Two opposite linear wipes leave a diagonal band.
+  await addEffects(project, clone, ["linearWipe", "linearWipe"]);
+  const [wipeA, wipeB] = (await findComponents(clone, "linearWipe")).slice(-2);
+  setParams(project, wipeA.comp, { "transition completion": s.edgeA, "wipe angle": opts.angle, feather: s.feather }, "Linear Wipe A");
+  setParams(project, wipeB.comp, { "transition completion": 100 - s.edgeB, "wipe angle": opts.angle + 180, feather: s.feather }, "Linear Wipe B");
+  if (opts.drift) {
+    await animateParam(project, clone, wipeA.comp, "transition completion", s.edgeA - s.drift, s.edgeA + s.drift, "slice edge A");
+    await animateParam(project, clone, wipeB.comp, "transition completion", 100 - s.edgeB + s.drift, 100 - s.edgeB - s.drift, "slice edge B");
+  }
+  log(`  slice layer on V${target + 1} (${opts.delayFrames} frames late)`, "ok");
+}
+
+async function addGlowLayer(project, sequence, item, look, opts, target, fps) {
+  const clone = await cloneTo(project, sequence, item, target, 0, fps);
+  await addEffects(project, clone, ["gaussian"]);
+  await configure(project, clone, "gaussian", { blurriness: look.glow.blurriness, "repeat edge pixels": true });
+  if (!(await configure(project, clone, "opacity", { opacity: look.glow.opacity, "blend mode": opts.screenBlend }))) {
+    log("  ? Opacity not found; set Blend Mode to Screen by hand.", "warn");
+  }
+  log(`  glow layer on V${target + 1}`, "ok");
+}
+
+let busy = false;
+
+async function applyLook(lookKey) {
+  if (busy) return;
+  busy = true;
+  document.body.classList.add("busy");
+  try {
+    await buildLook(lookKey);
+  } finally {
+    busy = false;
+    document.body.classList.remove("busy");
+  }
+}
+
+async function buildLook(lookKey) {
+  const look = LOOKS[lookKey];
+  const opts = readOptions();
+  saveOptions();
+  log(look.name, "head");
+  status(`Building ${look.name}…`, "busy");
+  try {
+    const { project, sequence } = await getContext();
+    const clips = await getSelectedVideoClips(sequence);
+    if (!clips.length) throw new Error("Select at least one video clip on the timeline.");
+    if (!(await resolveEffect("lumetri"))) throw new Error("Lumetri Color is missing; it's required for the look.");
+    const fps = await fpsOf(sequence);
+
+    const hasEcho = !!(await resolveEffect("echo"));
+    const hasWipe = !!(await resolveEffect("linearWipe"));
+    if (look.slices && !hasWipe) log("  slices need Linear Wipe; skipping the slice layer", "warn");
+
+    let built = 0;
+    for (const item of clips) {
+      log(`- ${await nameOf(item)}`);
+      if (await alreadyHasLook(item)) {
+        const again = await confirmDialog(
+          "Look already applied?",
+          `"${await nameOf(item)}" already has Lumetri Color and Directional Blur. Applying again stacks a second set of effects and layers.`,
+          "Apply again"
+        );
+        if (!again) {
+          log("  skipped: already has the look", "warn");
+          continue;
+        }
+      }
+      // Settle tracks first so nothing changes if the user cancels.
+      const layers = await prepareTracks(project, sequence, item, buildLayers(look, opts, hasEcho, hasWipe, fps), opts, fps);
+      if (!layers) {
+        log("  cancelled, clip left unchanged", "warn");
+        continue;
+      }
+      await applyBaseLook(project, item, look, opts, hasEcho);
+      for (const l of layers) {
+        if (l.kind === "trail") await addTrailLayer(project, sequence, item, l.layer, l.target, fps);
+        if (l.kind === "slice") await addSliceLayer(project, sequence, item, look, opts, l.target, fps);
+        if (l.kind === "glow") await addGlowLayer(project, sequence, item, look, opts, l.target, fps);
+      }
+      built++;
+    }
+    if (!built) {
+      status("Cancelled. Nothing was changed.", "warn");
+      return;
+    }
+    const skipped = Object.keys(resolved).filter((k) => !resolved[k]);
+    status(`${look.name} added.`, "ok");
+    if (skipped.length) log(`  (this Premiere has no ${skipped.map(effectLabel).join(", ")})`);
+    log("Done. Check in Effect Controls:", "ok");
+    if (hasEcho) log("  Echo > Echo Operator = Blend.");
+    if (opts.glow) log("  Glow layer > Opacity > Blend Mode = Screen.");
+    log("  Wrong? Fix by hand, click Inspect, and copy the number into Advanced.");
+    log("Save as preset: select the effects on a clip > right-click > Save Preset.");
+  } catch (e) {
+    status(`Failed: ${errText(e)}`, "err");
+    log(`Error: ${errText(e)}`, "err");
+  }
+}
+
+async function inspect() {
+  log("Inspect", "head");
+  status("Inspecting… see log below.", "busy");
+  const { sequence } = await getContext();
+  const clips = await getSelectedVideoClips(sequence);
+  if (!clips.length) throw new Error("Select a video clip on the timeline.");
+  for (const comp of await listComponents(clips[0])) {
+    log(`[${comp.index}] ${comp.name}  (${comp.match})`);
+    for (let i = 0; i < comp.comp.getParamCount(); i++) {
+      const p = comp.comp.getParam(i);
+      let value = "";
+      try {
+        const kf = await p.getStartValue();
+        const v = kf && kf.value !== undefined ? kf.value.value : kf;
+        value = typeof v === "object" ? JSON.stringify(v) : String(v);
+      } catch (e) {
+        value = "(unreadable)";
+      }
+      log(`    ${i}: ${p.displayName} = ${value}`);
+    }
+  }
+  status("Inspect done. See log below.", "ok");
+}
+
+async function listEffects() {
+  log("Available video effects", "head");
+  const { matches, displays } = await getEffectList();
+  const rows = matches.map((m, i) => `${displays[i] || "?"}  |  ${m}`).sort((a, b) => a.localeCompare(b));
+  for (const r of rows) log(`  ${r}`);
+  try {
+    await copyText([`Premiere video effects (${rows.length})`, ...rows].join("\n"));
+    status(`${rows.length} effects listed and copied to clipboard.`, "ok");
+  } catch (e) {
+    status(`${rows.length} effects listed in the log (clipboard unavailable: use Copy log).`, "warn");
+  }
+}
+
+async function copyText(text) {
+  if (navigator.clipboard.setContent) await navigator.clipboard.setContent({ "text/plain": text });
+  else await navigator.clipboard.writeText(text);
+}
+
+async function copyLog() {
+  await copyText(logLines.join("\n"));
+  status("Log copied to clipboard.", "ok");
+}
+
+function safe(fn) {
+  return async () => {
+    try {
+      await fn();
+    } catch (e) {
+      status(`Failed: ${errText(e)}`, "err");
+      log(`Error: ${errText(e)}`, "err");
+    }
+  };
+}
+
+window.addEventListener("unhandledrejection", (ev) => {
+  log(`Unhandled: ${errText(ev.reason)}`, "err");
+});
+
+// Cards are generated from LOOKS, so a new look only needs a LOOKS entry.
+function renderLooks() {
+  const grid = document.getElementById("looks");
+  for (const [key, look] of Object.entries(LOOKS)) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = look.name;
+    const desc = document.createElement("div");
+    desc.className = "card-desc";
+    desc.textContent = look.desc || "";
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.addEventListener("click", safe(() => applyLook(key)));
+    grid.appendChild(card);
+  }
+}
+
+function toggle(buttonId, sectionId) {
+  const btn = document.getElementById(buttonId);
+  const section = document.getElementById(sectionId);
+  btn.addEventListener("click", () => {
+    const open = section.style.display !== "block";
+    section.style.display = open ? "block" : "none";
+    btn.classList.toggle("active", open);
+  });
+}
+
+window.addEventListener("load", () => {
+  loadOptions();
+  renderLooks();
+  toggle("btn-settings", "settings");
+  toggle("btn-log", "logwrap");
+  let host = "";
+  try {
+    const h = require("uxp").host;
+    hostVersion = `${h.name} ${h.version}`;
+    host = ` (${hostVersion})`;
+  } catch (e) { /* host info unavailable */ }
+  document.getElementById("version").textContent = `v${VERSION}`;
+  log(`VizzFX ${VERSION} ready${host}`);
+  document.getElementById("btn-inspect").addEventListener("click", safe(inspect));
+  document.getElementById("btn-effects").addEventListener("click", safe(listEffects));
+  document.getElementById("btn-copy").addEventListener("click", safe(copyLog));
+  document.getElementById("btn-clear").addEventListener("click", () => {
+    document.getElementById("log").textContent = "";
+    logLines.length = 0;
+  });
+  for (const id of OPTION_IDS) document.getElementById(id).addEventListener("change", saveOptions);
+  const dlg = document.getElementById("confirm");
+  document.getElementById("confirm-ok").addEventListener("click", () => dlg.close("ok"));
+  document.getElementById("confirm-cancel").addEventListener("click", () => dlg.close("cancel"));
+});

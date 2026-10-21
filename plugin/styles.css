@@ -1,0 +1,62 @@
+/* Premiere panels are dark; colors are explicit so text never fades into the background.
+   UXP has no flex `gap`, so spacing uses margins. */
+html, body { height: 100%; }
+body { margin: 0; color: #f2f2f2; font-size: 12px; overflow-y: auto; }
+/* Fills the panel at any size; content reflows instead of keeping fixed widths. */
+.panel { box-sizing: border-box; width: 100%; min-height: 100%; padding: 14px; }
+
+.header { display: flex; flex-direction: row; align-items: baseline; margin-bottom: 14px; }
+.brand { font-size: 17px; font-weight: bold; color: #ffffff; }
+.version { margin-left: 8px; font-size: 11px; color: #8c8c8c; }
+
+.section-label, .sub-label { font-size: 10px; font-weight: bold; letter-spacing: 1px; color: #9a9a9a; margin-bottom: 8px; }
+.sub-label { margin-top: 12px; }
+
+/* Cards grow to fill each row and wrap below ~150px: 1 column when narrow, 2+ when wide. */
+.grid { display: flex; flex-direction: row; flex-wrap: wrap; margin-right: -8px; }
+.card {
+  box-sizing: border-box; flex: 1 1 150px; min-width: 0; margin: 0 8px 8px 0; padding: 10px 12px; border-radius: 8px;
+  background-color: #2f2f2f; border: 1px solid #3d3d3d; cursor: pointer;
+}
+.card:hover { background-color: #383838; border-color: #5a8dee; }
+.card-title { font-size: 13px; font-weight: bold; color: #ffffff; margin-bottom: 3px; }
+.card-desc { font-size: 11px; color: #a8a8a8; line-height: 15px; }
+body.busy .card { opacity: 0.5; }
+
+.status { margin-top: 4px; padding: 8px 10px; border-radius: 6px; background-color: #262626; color: #d0d0d0; line-height: 16px; }
+.status.ok { color: #7ee08a; }
+.status.err { color: #ff7b7b; }
+.status.busy { color: #8fb8ff; }
+.status.warn { color: #f0c060; }
+
+.footer { display: flex; flex-direction: row; margin-top: 10px; }
+.link { color: #9a9a9a; margin-right: 16px; cursor: pointer; padding: 2px 0; }
+.link:hover, .link.active { color: #ffffff; }
+
+.drawer { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3a3a; }
+#settings .check-row, #settings .field-row, #settings .hint { max-width: 420px; }
+
+.check-row { min-height: 26px; padding: 2px 0; display: flex; align-items: center; }
+.field-row { display: flex; flex-direction: row; align-items: center; min-height: 30px; padding: 2px 0; }
+.field-row .label { flex: 1 1 auto; min-width: 0; color: #f2f2f2; padding-right: 8px; }
+.field-row .num { width: 56px; flex: 0 0 56px; }
+.hint { font-size: 11px; color: #9a9a9a; margin-top: 6px; line-height: 15px; }
+
+.tool-row { display: flex; flex-direction: row; flex-wrap: wrap; margin-bottom: 8px; }
+.chip { padding: 4px 10px; margin: 0 6px 6px 0; border-radius: 12px; background-color: #333333; color: #e8e8e8; cursor: pointer; }
+.chip:hover { background-color: #444444; }
+
+.log {
+  font-family: Menlo, Consolas, monospace; font-size: 11px; line-height: 15px; color: #d8d8d8;
+  max-height: 260px; min-height: 40px; overflow-y: auto; word-wrap: break-word; padding: 6px 8px; border-radius: 6px; background-color: #181818;
+}
+.log .ok { color: #7ee08a; }
+.log .warn { color: #f0c060; }
+.log .err { color: #ff7b7b; }
+.log .head { font-weight: bold; margin-top: 4px; color: #ffffff; }
+
+.dlg { padding: 4px 4px 0; color: #f2f2f2; }
+.dlg-title { font-size: 14px; font-weight: bold; margin-bottom: 8px; color: #ffffff; }
+.dlg-text { line-height: 18px; margin-bottom: 16px; }
+.dlg-buttons { display: flex; flex-direction: row; justify-content: flex-end; }
+.dlg-buttons sp-button { margin-left: 8px; }

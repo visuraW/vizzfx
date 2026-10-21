@@ -1,0 +1,33 @@
+{
+  "id": "com.vizzfx.premiere",
+  "name": "VizzFX",
+  "version": "1.4.1",
+  "main": "index.html",
+  "host": {
+    "app": "premierepro",
+    "minVersion": "25.6.0"
+  },
+  "manifestVersion": 5,
+  "requiredPermissions": { "clipboard": "readAndWrite" },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "vizzfx",
+      "label": { "default": "VizzFX" },
+      "minimumSize": { "width": 200, "height": 200 },
+      "maximumSize": { "width": 2000, "height": 2000 },
+      "preferredDockedSize": { "width": 320, "height": 420 },
+      "preferredFloatingSize": { "width": 340, "height": 440 },
+      "icons": [
+        { "width": 23, "height": 23, "path": "icons/dark.svg", "scale": [1, 2], "theme": ["darkest", "dark", "medium"] },
+        { "width": 23, "height": 23, "path": "icons/light.svg", "scale": [1, 2], "theme": ["lightest", "light"] }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "width": 48, "height": 48, "path": "icons/plugin-icon.svg", "scale": [1, 2],
+      "theme": ["darkest", "dark", "medium", "lightest", "light", "all"], "species": ["pluginList"]
+    }
+  ]
+}

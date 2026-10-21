@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="index.js"></script>
+  </head>
+  <body>
+    <div class="panel">
+      <div class="header">
+        <span class="brand">VizzFX</span>
+        <span id="version" class="version"></span>
+      </div>
+
+      <div class="section-label">LOOKS</div>
+      <div id="looks" class="grid"></div>
+
+      <div id="status" class="status">Select a clip, then click a look.</div>
+
+      <div class="footer">
+        <div id="btn-settings" class="link">Settings</div>
+        <div id="btn-log" class="link">Log</div>
+      </div>
+
+      <div id="settings" class="drawer">
+        <div class="check-row"><sp-checkbox id="opt-autoadd" checked size="s">Add missing tracks automatically</sp-checkbox></div>
+        <div class="check-row"><sp-checkbox id="opt-trails" checked size="s">Trail layers (when Echo is missing)</sp-checkbox></div>
+        <div class="check-row"><sp-checkbox id="opt-glow" checked size="s">Glow layer</sp-checkbox></div>
+        <div class="check-row"><sp-checkbox id="opt-letterbox" checked size="s">Letterbox 2.39:1</sp-checkbox></div>
+        <div class="check-row"><sp-checkbox id="opt-drift" checked size="s">Animate slice drift</sp-checkbox></div>
+        <div class="field-row">
+          <span class="label">Slice delay (frames)</span>
+          <sp-textfield id="opt-delay" value="8" size="s" class="num"></sp-textfield>
+        </div>
+        <div class="field-row">
+          <span class="label">Slice angle (°)</span>
+          <sp-textfield id="opt-angle" value="17" size="s" class="num"></sp-textfield>
+        </div>
+        <div class="sub-label">Advanced</div>
+        <div class="field-row">
+          <span class="label">Echo Operator value (Blend)</span>
+          <sp-textfield id="opt-echo-op" value="7" size="s" class="num"></sp-textfield>
+        </div>
+        <div class="field-row">
+          <span class="label">Blend Mode value (Screen)</span>
+          <sp-textfield id="opt-screen" value="8" size="s" class="num"></sp-textfield>
+        </div>
+        <div class="hint">If a dropdown comes out wrong, set it by hand, run Inspect clip, and copy its number here.</div>
+      </div>
+
+      <div id="logwrap" class="drawer">
+        <div class="tool-row">
+          <div id="btn-inspect" class="chip">Inspect clip</div>
+          <div id="btn-effects" class="chip">List effects</div>
+          <div id="btn-copy" class="chip">Copy log</div>
+          <div id="btn-clear" class="chip">Clear</div>
+        </div>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+
+    <dialog id="confirm">
+      <div class="dlg">
+        <div id="confirm-title" class="dlg-title"></div>
+        <div id="confirm-text" class="dlg-text"></div>
+        <div class="dlg-buttons">
+          <sp-button id="confirm-cancel" variant="secondary" size="s">Cancel</sp-button>
+          <sp-button id="confirm-ok" variant="cta" size="s">Continue</sp-button>
+        </div>
+      </div>
+    </dialog>
+  </body>
+</html>
