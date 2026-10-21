@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.1
+- Remove works even when Premiere doesn't keep VizzFX's labels. It matches the look's effects at the end of the stack plus VizzFX layers, and confirms first.
+- Scanlines template bundled: CRT Lines and CRT TV work fully.
+
 ## 1.11.0
 - The active look's card is highlighted, and the panel remembers it.
 - Remove button under each look's sliders, plus an Applied tab listing the looks on the selected clip, with layers on/off and Remove.

@@ -59,7 +59,7 @@ class Component {
   constructor(match, params) { this.match = match; this.params = params || CATALOG[match][1].map((n) => new Param(n)); }
   async getMatchName() { return this.match; }
   async getInstanceName() { return this.instanceName || ""; }
-  createSetInstanceNameAction(n) { return () => { this.instanceName = n; }; }
+  createSetInstanceNameAction(n) { return () => { if (process.env.LABELS !== "0") this.instanceName = n; }; }
   async getDisplayName() { return (CATALOG[this.match] || CATALOG["AE.ADBE Capsule"])[0]; }
   getParamCount() { return this.params.length; }
   getParam(i) { return this.params[i]; }
@@ -80,7 +80,7 @@ class VideoClipTrackItem {
     this.chain = chain || new Chain([new Component("AE.ADBE Motion"), new Component("AE.ADBE Opacity")]);
   }
   async getName() { return this.name; }
-  createSetNameAction(n) { return () => { this.name = n; }; }
+  createSetNameAction(n) { return () => { if (process.env.LABELS !== "0") this.name = n; }; }
   async isDisabled() { return !!this.disabled; }
   createSetDisabledAction(d) { return () => { this.disabled = d; }; }
   async getComponentChain() { return this.chain; }

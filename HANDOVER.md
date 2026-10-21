@@ -72,11 +72,12 @@ scripts/build.sh        zips plugin/ into dist/VizzFX.ccx
 - Every effect VizzFX adds is labeled with its instance name, `VizzFX · <Look>`, which shows in Effect Controls.
 - Copies and templates are named the same way on the timeline.
 - **Remove** (under a look's sliders) and the **Applied** tab find items only by those labels, so they never touch the user's own effects.
+- In real Premiere 26.3.2 the labels didn't stick (needs checking with the "labels didn't stick" log line). So Remove falls back to `LOOK_EFFECTS`: it removes the trailing run of the look's effect types, plus VizzFX layers above the clip (template clips named VizzFX…, and for Ghost/Shattered, copies of the clip). It always asks first.
 - Premiere has no API to switch an effect on or off, so Applied can only switch **layers** on and off; effects can only be removed.
 
 ## Open items
 
-1. **Scanlines template:** `VizzFX_Scanlines.mogrt` was exported to the user's Desktop but hasn't been sent yet. Bundle it into `plugin/mogrt/` to complete CRT Lines and CRT TV.
+1. **Labels:** find out why `createSetInstanceNameAction` / `createSetNameAction` don't stick in Premiere 26.3.2. The log line "labels didn't stick (transaction …, read back …)" shows what happened.
 2. **Film Impact setting names** (Glint, Volumetric Rays, Wonder Glow, RGB Split) are partly guesses. A blog lists RGB Split as Channel Shift, Vertical Split, Position, Feather, Lightness and Softness. Volumetric Rays has Intensity and Ray Length. Glint may have no ray-count setting at all, which would explain why the Rays slider does nothing. Get one real log (the missing-setting warnings list the actual names) and fix `SPLIT_PARAM`, `GLOW_PARAM` and `RAYS`.
 3. **Screen blend value:** set a glow layer to Screen by hand, run Inspect, and put the number in the default.
 4. **Keyframe timing** (Shattered slice drift) is assumed to be measured from the clip's in point. Unverified.

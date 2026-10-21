@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.11.0";
+const VERSION = "1.11.1";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -110,6 +110,24 @@ Object.assign(LOOKS, {
     apply: (ctx) => applyHud(ctx),
   },
 });
+
+// Effect types each look adds to the clip. Remove uses this when Premiere didn't keep the labels.
+const LOOK_EFFECTS = {
+  ghost: ["echo", "lumetri", "dirBlur", "noise", "crop"],
+  shattered: ["echo", "lumetri", "dirBlur", "noise", "crop"],
+  lowShutter: ["posterizeTime", "gaussian", "dirBlur", "lumetri", "noise"],
+  thermal: ["gaussian", "lumetri", "noise"],
+  hud: [],
+  led: ["mosaic", "lumetri", "rgbSplit", "wonderGlow"],
+  diamond: ["blackWhite", "lumetri", "noise", "gaussian", "brightContrast", "sharpen", "glint", "wonderGlow"],
+  grain: ["noise"],
+  neon: ["tint", "lumetri", "rgbSplit", "wonderGlow"],
+  rays: ["lumetri", "glint", "volumetricRays"],
+  lens: ["lensDistortion", "lumetri"],
+  crtLines: [],
+  crtTv: ["gaussian", "rgbSplit", "lumetri", "noise"],
+  wall: ["replicate"],
+};
 
 const LETTERBOX_CROP = 12.8; // % top and bottom: 16:9 -> ~2.39:1
 
@@ -343,9 +361,14 @@ let tagWarned = false;
 async function tagComponents(project, item, start, count, tag) {
   try {
     const chain = await item.getComponentChain();
-    transact(project, "VizzFX: label effects", (ca) => {
+    const ok = transact(project, "VizzFX: label effects", (ca) => {
       for (let i = start; i < start + count; i++) ca.addAction(chain.getComponentAtIndex(i).createSetInstanceNameAction(tag));
     });
+    const check = await instanceName((await item.getComponentChain()).getComponentAtIndex(start));
+    if ((!ok || check !== tag) && !tagWarned) {
+      log(`  · labels didn't stick (transaction ${ok}, read back "${check}"); Remove will match by effect type`, "warn");
+      tagWarned = true;
+    }
   } catch (e) {
     if (!tagWarned) log(`  · effects can't be labeled in this Premiere (${errText(e)}); Remove will match by effect type`, "warn");
     tagWarned = true;
@@ -1541,6 +1564,41 @@ async function removeGroup(project, sequence, item, g) {
   if (g.layers.length) removeItems(project, sequence, g.layers, ppro.Constants.MediaType.VIDEO, "VizzFX: remove layers");
 }
 
+// Without labels: the trailing run of this look's effect types (VizzFX appends at the end),
+// plus layers above that VizzFX made (templates named "VizzFX…", or copies of the clip
+// starting within a second of it).
+async function findUnlabeled(sequence, item, lookKey) {
+  const wanted = [];
+  for (const k of LOOK_EFFECTS[lookKey] || []) {
+    const m = await resolveEffect(k);
+    if (m) wanted.push(m);
+  }
+  const comps = await listComponents(item);
+  const effects = [];
+  const remaining = [...wanted];
+  for (let i = comps.length - 1; i >= 0 && remaining.length; i--) {
+    const at = remaining.lastIndexOf(comps[i].match);
+    if (at < 0) break;
+    remaining.splice(at, 1);
+    effects.unshift(comps[i]);
+  }
+  const layers = [];
+  const baseName = await nameOf(item);
+  const base = await item.getTrackIndex();
+  const start = (await item.getStartTime()).seconds;
+  const count = await sequence.getVideoTrackCount();
+  for (let t = base + 1; t < count; t++) {
+    for (const it of await itemsOnTrack(await sequence.getVideoTrack(t))) {
+      const s = (await it.getStartTime()).seconds;
+      if (s < start - 0.05 || s > start + 1) continue;
+      const n = await nameOf(it);
+      const isCopy = n === baseName || n.startsWith(`${baseName} `);
+      if (n.startsWith("VizzFX") || (isCopy && ["ghost", "shattered"].includes(lookKey))) layers.push(it);
+    }
+  }
+  return { effects, layers };
+}
+
 // Remove one look (or every VizzFX look when lookKey is null) from the selected clips.
 async function removeLook(lookKey) {
   const { project, sequence } = await getContext();
@@ -1559,8 +1617,30 @@ async function removeLook(lookKey) {
     }
   }
   const what = lookKey ? LOOKS[lookKey].name : "VizzFX looks";
+  if (!effects && !layers && lookKey) {
+    // Labels missing: match by effect type, and confirm before removing.
+    const found = [];
+    for (const item of clips) found.push({ item, g: await findUnlabeled(sequence, item, lookKey) });
+    const list = [];
+    for (const f of found) {
+      for (const c of f.g.effects) list.push(c.name);
+      for (const l of f.g.layers) list.push(`layer "${await nameOf(l)}"`);
+    }
+    if (!list.length) {
+      status(`No ${what} found on the selected clip.`, "warn");
+      return;
+    }
+    const ok = await confirmDialog(`Remove ${what}?`,
+      `These were added last on the selected clip and match ${what}: ${list.join(", ")}. Remove them?`, "Remove");
+    if (!ok) return status("Nothing removed.");
+    for (const f of found) {
+      await removeGroup(project, sequence, f.item, f.g);
+      effects += f.g.effects.length;
+      layers += f.g.layers.length;
+    }
+  }
   if (!effects && !layers) {
-    status(`No ${what} found on the selected clip. (Looks added before v1.11 aren't labeled; remove those by hand.)`, "warn");
+    status(`No ${what} found on the selected clip.`, "warn");
   } else {
     status(`Removed ${what}: ${effects} effect${effects === 1 ? "" : "s"}, ${layers} layer${layers === 1 ? "" : "s"}.`, "ok");
   }
