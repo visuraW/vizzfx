@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.0
+- New looks: Eye View, CRT Lines, CRT TV, Video Wall.
+- Lens Tube template bundled.
+- One After Effects script builds both the Scanlines and Eye templates.
+
 ## 1.8.0
 - New looks: Neon (palette swatches + custom hue), Light Rays, Lens Tube.
 - LED Pixel goes up to 1080 rows.

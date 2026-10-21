@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.8.0";
+const VERSION = "1.9.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -79,6 +79,30 @@ Object.assign(LOOKS, {
     signature: ["lensDistortion"],
     apply: (ctx) => applyLens(ctx),
   },
+  eye: {
+    name: "Eye View",
+    desc: "Seen through a living eye",
+    signature: ["lensDistortion", "gaussian"],
+    apply: (ctx) => applyEye(ctx),
+  },
+  crtLines: {
+    name: "CRT Lines",
+    desc: "Bold horizontal lines",
+    signature: null,
+    apply: (ctx) => applyCrtLines(ctx),
+  },
+  crtTv: {
+    name: "CRT TV",
+    desc: "Old TV scanlines, soft and washed",
+    signature: ["rgbSplit", "noise"],
+    apply: (ctx) => applyCrtTv(ctx),
+  },
+  wall: {
+    name: "Video Wall",
+    desc: "The clip in a 2x2 or 3x3 grid",
+    signature: ["replicate"],
+    apply: (ctx) => applyWall(ctx),
+  },
   grain: {
     name: "Film Grain",
     desc: "Fine mono grain, adjustable",
@@ -117,6 +141,7 @@ const EFFECTS = {
   tint: [["Tint"], ["AE.ADBE Tint"]],
   volumetricRays: [["Volumetric Rays"], ["AE.Impact_Volumetric_Rays_FX"]],
   lensDistortion: [["Lens Distortion"], ["PR.ADBE Lens Distortion"]],
+  replicate: [["Replicate"], ["AE.ADBE Replicate"]],
 };
 const effectLabel = (key) => EFFECTS[key][0][0];
 
@@ -1160,6 +1185,58 @@ async function applyLens({ project, sequence, item, opts, fps }) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Eye View, CRT Lines, CRT TV, Video Wall
+// ---------------------------------------------------------------------------
+const SCAN_MOGRT = "VizzFX_Scanlines.mogrt";
+const EYE_MOGRT = "VizzFX_Eye.mogrt";
+
+async function applyEye({ project, sequence, item, opts, fps }) {
+  await addEffects(project, item, ["lensDistortion", "gaussian", "lumetri"]);
+  const c = LOOK_CONTROLS.eye;
+  await configure(project, item, "lensDistortion", { curvature: -c.bulge });
+  await configure(project, item, "gaussian", { blurriness: c.blur, "repeat edge pixels": true });
+  await configure(project, item, "lumetri", { saturation: c.color, contrast: 30, blacks: -20 });
+  await addOverlay(project, sequence, item, opts, fps, EYE_MOGRT, "Eye", {
+    "pupil size": c.pupil, "pupil pulse": c.pulse, "fiber opacity": c.fibers, "rotation speed": c.rotation,
+  });
+  log("  eye view applied", "ok");
+  return true;
+}
+
+// Bold lines through the frame (like the "ENERGY" title).
+async function applyCrtLines({ project, sequence, item, opts, fps }) {
+  const c = LOOK_CONTROLS.crtLines;
+  await addOverlay(project, sequence, item, opts, fps, SCAN_MOGRT, "Scanlines", {
+    lines: c.lines, "thickness %": c.thickness, "line opacity": c.opacity, "roll speed": c.roll,
+  });
+  return true;
+}
+
+// Old TV: fine scanlines, soft washed picture, color fringe, grain, vignette.
+async function applyCrtTv({ project, sequence, item, opts, fps }) {
+  await addEffects(project, item, ["gaussian", "rgbSplit", "lumetri", "noise"]);
+  const c = LOOK_CONTROLS.crtTv;
+  await configure(project, item, "gaussian", { blurriness: c.softness, "repeat edge pixels": true });
+  await configure(project, item, "rgbSplit", { [SPLIT_PARAM]: 10 });
+  await configure(project, item, "lumetri", { exposure: 0.15, contrast: -10, saturation: c.color, amount: -1 });
+  await configure(project, item, "noise", { "amount of noise|amount": 6, "noise type|use color noise": false });
+  await addOverlay(project, sequence, item, opts, fps, SCAN_MOGRT, "Scanlines", {
+    lines: c.lines, "thickness %": 50, "line opacity": c.opacity, "roll speed": c.roll,
+  });
+  log("  CRT TV applied", "ok");
+  return true;
+}
+
+// The clip repeated N x N with Premiere's Replicate.
+async function applyWall({ project, item }) {
+  if (!(await resolveEffect("replicate"))) throw new Error("Replicate is missing in this Premiere.");
+  await addEffects(project, item, ["replicate"]);
+  await configure(project, item, "replicate", { count: LOOK_CONTROLS.wall.grid });
+  log(`  video wall ${LOOK_CONTROLS.wall.grid} x ${LOOK_CONTROLS.wall.grid}`, "ok");
+  return true;
+}
+
 // Film Impact parameter names aren't documented; these try the likely ones.
 const SPLIT_PARAM = "amount|distance|offset|strength|split";
 const GLOW_PARAM = "intensity|amount|strength|glow";
@@ -1218,6 +1295,48 @@ const CONTROL_DEFS = {
       apply: (x, v) => configure(x.project, x.item, "lensDistortion", { curvature: v }) },
     { id: "vignette", label: "Vignette", min: 0, max: 100, step: 1, value: 50,
       apply: (x, v) => configure(x.project, x.item, "lumetri", { amount: -v / 20 }) },
+  ],
+  eye: [
+    { id: "pupil", label: "Pupil size", min: 5, max: 80, step: 1, value: 30,
+      apply: (x, v) => setOverlayParam(x, "Pupil Size", v) },
+    { id: "pulse", label: "Breathing", min: 0, max: 40, step: 1, value: 8,
+      apply: (x, v) => setOverlayParam(x, "Pupil Pulse", v) },
+    { id: "fibers", label: "Iris fibers", min: 0, max: 100, step: 1, value: 60,
+      apply: (x, v) => setOverlayParam(x, "Fiber Opacity", v) },
+    { id: "rotation", label: "Iris spin", min: -30, max: 30, step: 1, value: 4,
+      apply: (x, v) => setOverlayParam(x, "Rotation Speed", v) },
+    { id: "color", label: "Color", min: 0, max: 150, step: 1, value: 0,
+      apply: (x, v) => configure(x.project, x.item, "lumetri", { saturation: v }) },
+    { id: "bulge", label: "Bulge", min: 0, max: 100, step: 1, value: 35,
+      apply: (x, v) => configure(x.project, x.item, "lensDistortion", { curvature: -v }) },
+    { id: "blur", label: "Blur", min: 0, max: 30, step: 0.5, value: 3,
+      apply: (x, v) => configure(x.project, x.item, "gaussian", { blurriness: v }) },
+  ],
+  crtLines: [
+    { id: "lines", label: "Lines", min: 4, max: 200, step: 1, value: 40,
+      apply: (x, v) => setOverlayParam(x, "Lines", v) },
+    { id: "thickness", label: "Thickness", min: 5, max: 90, step: 1, value: 45,
+      apply: (x, v) => setOverlayParam(x, "Thickness %", v) },
+    { id: "opacity", label: "Opacity", min: 0, max: 100, step: 1, value: 100,
+      apply: (x, v) => setOverlayParam(x, "Line Opacity", v) },
+    { id: "roll", label: "Roll", min: 0, max: 200, step: 1, value: 0,
+      apply: (x, v) => setOverlayParam(x, "Roll Speed", v) },
+  ],
+  crtTv: [
+    { id: "lines", label: "Lines", min: 60, max: 540, step: 1, value: 270,
+      apply: (x, v) => setOverlayParam(x, "Lines", v) },
+    { id: "opacity", label: "Line strength", min: 0, max: 100, step: 1, value: 40,
+      apply: (x, v) => setOverlayParam(x, "Line Opacity", v) },
+    { id: "softness", label: "Softness", min: 0, max: 10, step: 0.5, value: 1.5,
+      apply: (x, v) => configure(x.project, x.item, "gaussian", { blurriness: v }) },
+    { id: "color", label: "Color", min: 0, max: 150, step: 1, value: 80,
+      apply: (x, v) => configure(x.project, x.item, "lumetri", { saturation: v }) },
+    { id: "roll", label: "Roll", min: 0, max: 200, step: 1, value: 20,
+      apply: (x, v) => setOverlayParam(x, "Roll Speed", v) },
+  ],
+  wall: [
+    { id: "grid", label: "Grid", min: 2, max: 3, step: 1, value: 2,
+      apply: (x, v) => configure(x.project, x.item, "replicate", { count: v }) },
   ],
   diamond: [
     { id: "sparkle", label: "Sparkle", min: 0, max: 100, step: 1, value: 35,

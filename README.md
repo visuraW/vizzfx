@@ -15,6 +15,10 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 - Neon: Vice City style glow. Pick a palette (Vice, Purple Haze, Cyber, Toxic, Sunset, Ice) or any hue
 - Light Rays: star rays and light shafts that come from the bright parts of the video. Choose how many rays
 - Lens Tube: shooting through a lens, with a blurry barrel ring and bokeh. Ring and bokeh are adjustable
+- Eye View: your video seen through a living eye, with a breathing pupil and drifting iris. Color or black and white
+- CRT Lines: bold horizontal lines through the frame
+- CRT TV: old TV look with fine scanlines, a soft washed picture and color fringing
+- Video Wall: the clip repeated in a 2x2 or 3x3 grid
 - Film Grain: fine monochrome grain. The Grain slider adjusts it live on the selected clips (and the grain in other looks)
 
 ## Install
@@ -35,7 +39,7 @@ VizzFX adds layers on free tracks above your clip, and adds tracks if it needs m
 
 **Tracking HUD:** edit the text, box position and size in Window > Essential Graphics. Keyframe Box Center to follow a face. (To change the HUD design, edit `after-effects/build-hud-mogrt.jsx` and re-export it from After Effects.)
 
-**Sliders:** after you click a look (LED Pixel, Diamond X-Ray, Neon, Light Rays, Lens Tube), its sliders appear under the cards. Moving one updates the selected clips live.
+**Sliders:** after you click a look (any look except Film Grain, which has its own slider), its sliders appear under the cards. Moving one updates the selected clips live.
 
 **LED grid:** the gaps and subpixel lines are a template placed above the clip. The Pixels and Gap sliders keep it lined up with the pixels. Fine-tune Gap Opacity and Subpixels in Window > Essential Graphics.
 
