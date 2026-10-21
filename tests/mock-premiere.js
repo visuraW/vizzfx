@@ -157,7 +157,7 @@ const ppro = {
 const logLines = [];
 const els = {};
 const defaults = {
-  "opt-autoadd": { tag: "sp-checkbox", checked: !process.env.NOAUTO }, "opt-fadein": { tag: "sp-checkbox", checked: true }, "opt-trails": { tag: "sp-checkbox", checked: true },
+  "opt-autoadd": { tag: "sp-checkbox", checked: !process.env.NOAUTO }, "opt-fadein": { tag: "sp-checkbox", checked: true }, "opt-grain": { tag: "sp-slider", value: process.env.GRAIN || "4" }, "opt-trails": { tag: "sp-checkbox", checked: true },
   "opt-glow": { tag: "sp-checkbox", checked: true }, "opt-letterbox": { tag: "sp-checkbox", checked: true },
   "opt-drift": { tag: "sp-checkbox", checked: true }, "opt-delay": { tag: "sp-textfield", value: "8" },
   "opt-angle": { tag: "sp-textfield", value: "17" }, "opt-echo-op": { tag: "sp-textfield", value: "7" },
@@ -226,9 +226,13 @@ onload();
 
 (async () => {
   const which = process.argv[3] || "shattered";
-  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD" }[which];
+  const name = { ghost: "Ghost Trail", shattered: "Shattered Light", low: "Low Shutter", thermal: "Thermal", hud: "Tracking HUD", grain: "Film Grain" }[which];
   await clickLook(name);
   if (process.argv[4] === "twice") await clickLook(name);
+  if (process.env.SLIDE) {
+    els["opt-grain"].value = process.env.SLIDE;
+    await els["opt-grain"].handlers.change();
+  }
   process.stdout.write(logLines.join("\n") + "\n\n");
   const dump = (label, items) => {
     for (const it of items) {

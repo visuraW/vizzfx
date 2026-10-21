@@ -10,6 +10,7 @@ One-click looks for Premiere Pro. Select a clip, click a look, and VizzFX builds
 - Low Shutter: stepped 6 fps motion with soft smear, fades in from black
 - Thermal: heat-camera colors
 - Tracking HUD: sci-fi HUD with editable text, keyframe the box to follow a face
+- Film Grain: fine monochrome grain. The Grain slider adjusts it live on the selected clips (and the grain in other looks)
 
 ## Install
 

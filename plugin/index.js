@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.5.2";
+const VERSION = "1.6.0";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -48,6 +48,12 @@ Object.assign(LOOKS, {
     desc: "Heat-camera colors, grain, vignette",
     signature: ["lumetri", "gaussian"],
     apply: (ctx) => applyThermal(ctx),
+  },
+  grain: {
+    name: "Film Grain",
+    desc: "Fine mono grain, adjustable",
+    signature: null,
+    apply: (ctx) => applyGrain(ctx),
   },
   hud: {
     name: "Tracking HUD",
@@ -103,7 +109,7 @@ function errText(e) {
   return (e && (e.message || e.toString())) || String(e);
 }
 
-const OPTION_IDS = ["opt-fadein", "opt-autoadd", "opt-glow", "opt-letterbox", "opt-drift", "opt-trails", "opt-delay", "opt-angle", "opt-echo-op", "opt-screen"];
+const OPTION_IDS = ["opt-grain", "opt-fadein", "opt-autoadd", "opt-glow", "opt-letterbox", "opt-drift", "opt-trails", "opt-delay", "opt-angle", "opt-echo-op", "opt-screen"];
 
 function readOptions() {
   const num = (id, d) => {
@@ -114,6 +120,7 @@ function readOptions() {
   return {
     autoAdd: on("opt-autoadd"),
     fadeIn: on("opt-fadein"),
+    grain: Math.round(num("opt-grain", 4) * 10) / 10,
     glow: on("opt-glow"),
     letterbox: on("opt-letterbox"),
     drift: on("opt-drift"),
@@ -824,6 +831,40 @@ async function offerLutCopy() {
   }
 }
 
+// Grain matched to the reference flyer: monochrome, ~1px, luma std ~4.6/255.
+// Re-applying updates the existing grain instead of stacking another Noise.
+async function applyGrain({ project, item, opts }) {
+  const amount = { "amount of noise|amount": opts.grain, "noise type|use color noise": false, clipping: true };
+  if (await configure(project, item, "noise", amount)) {
+    log(`  grain updated to ${opts.grain}`, "ok");
+  } else {
+    await addEffects(project, item, ["noise"]);
+    await configure(project, item, "noise", amount);
+    log(`  grain added (${opts.grain})`, "ok");
+  }
+  LOOKS.grain.doneMessage = `Grain set to ${opts.grain}. Drag the slider to change it.`;
+  return true;
+}
+
+// Slider: live-update grain on selected clips that already have it.
+async function updateGrainLive() {
+  const opts = readOptions();
+  saveOptions();
+  try {
+    const { project, sequence } = await getContext();
+    let n = 0;
+    for (const item of await getSelectedVideoClips(sequence)) {
+      const c = await findComponent(item, "noise");
+      if (!c) continue;
+      setParams(project, c.comp, { "amount of noise|amount": opts.grain }, "Grain");
+      n++;
+    }
+    status(n ? `Grain ${opts.grain} on ${n} clip${n > 1 ? "s" : ""}.` : `Grain ${opts.grain}. Click Film Grain to apply.`, n ? "ok" : "");
+  } catch (e) {
+    status(`Grain ${opts.grain}`, "");
+  }
+}
+
 // HUD: inserts the VizzFX HUD template on a free track above the clip, trimmed to the clip.
 async function hudPath() {
   try {
@@ -1073,6 +1114,10 @@ window.addEventListener("load", () => {
     logLines.length = 0;
   });
   for (const id of OPTION_IDS) document.getElementById(id).addEventListener("change", saveOptions);
+  const grain = document.getElementById("opt-grain");
+  grain.addEventListener("input", () => (document.getElementById("grain-value").textContent = Number(grain.value).toFixed(1)));
+  grain.addEventListener("change", safe(updateGrainLive));
+  document.getElementById("grain-value").textContent = Number(grain.value).toFixed(1);
   const dlg = document.getElementById("confirm");
   document.getElementById("confirm-ok").addEventListener("click", () => dlg.close("ok"));
   document.getElementById("confirm-cancel").addEventListener("click", () => dlg.close("cancel"));

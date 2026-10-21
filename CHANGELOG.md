@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0
+- Film Grain look, matched to a reference flyer (fine, monochrome).
+- Grain slider updates grain live on selected clips; re-applying updates instead of stacking.
+
 ## 1.5.2
 - Thermal: "Save LUT file…" puts the LUT where you choose, instead of a hidden plugin path.
 
