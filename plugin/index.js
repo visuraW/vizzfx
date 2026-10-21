@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.11.3";
+const VERSION = "1.11.4";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched

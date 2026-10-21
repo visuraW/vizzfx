@@ -91,7 +91,10 @@ What to build:
 - Keep `findUnlabeled` only for clips made with versions before 1.12.
 - Update `tests/mock-premiere.js`: add project items, an "Adjustment Layer" item, `createOverwriteItemAction`, and `isAdjustmentLayer`.
 
-### 2. Template sliders don't reach the template in real Premiere
+### 2. Template sliders: FIXED in 1.11.4 (kept for reference)
+Root cause: After Effects exports slider controls with a 0–100 range in `definition.json`, and Premiere clamps to it (log: "asked 301, now 100"). That also cut Frame Width/Height to 100. **After exporting any template from After Effects, run `python3 scripts/patch-mogrt-ranges.py plugin/mogrt/*.mogrt`.** If values still clamp after patching, the limit also lives inside `project.aegraphic`, and the slider range then has to be set in After Effects before exporting.
+
+Original notes:
 CRT Lines at 600 looked the same as the default of 40, so `setParams` on the template (`AE.ADBE Capsule`) seems to have no effect. LED grid and Lens Tube sliders are probably affected too. Since 1.11.2 the log prints `template Lines: asked X, now Y`. Get that line from the user first.
 - If the value is rejected, ship several fixed versions of each template (e.g. Scanlines Fine about 300 lines, Medium about 150, Bold about 40) and pick one from the slider range. Fine-tuning then happens in Essential Graphics.
 - If the setting is found but has a different type or name, fix how the value is created.

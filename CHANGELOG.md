@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.11.4
+- Fixed: template sliders were capped at 100 (After Effects' default slider range), so CRT Lines stopped at 100 and frame sizes were cut to 100x100. All templates are patched with real ranges (scripts/patch-mogrt-ranges.py).
+
 ## 1.11.3
 - Template sliders (CRT lines, LED grid, Lens Tube) find the template when it merely overlaps the clip, or when the template itself is selected.
 
