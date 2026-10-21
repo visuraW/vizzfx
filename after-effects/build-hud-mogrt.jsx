@@ -21,12 +21,12 @@
         fx.property(1).setValue(value);
         return fx.property(1);
     }
-    var pCenter = addCtrl("ADBE Point Control", "Box Center", [708, 374]);
-    var pSize = addCtrl("ADBE Point Control", "Box Size", [560, 462]);
-    var pColor = addCtrl("ADBE Color Control", "HUD Color", [1, 1, 1]);
-    var pSpeed = addCtrl("ADBE Slider Control", "Type Speed", 40);
-    var pRec = addCtrl("ADBE Checkbox Control", "Show REC", 1);
-    var pLines = addCtrl("ADBE Checkbox Control", "Scanlines", 1);
+    addCtrl("ADBE Point Control", "Box Center", [708, 374]);
+    addCtrl("ADBE Point Control", "Box Size", [560, 462]);
+    addCtrl("ADBE Color Control", "HUD Color", [1, 1, 1]);
+    addCtrl("ADBE Slider Control", "Type Speed", 40);
+    addCtrl("ADBE Checkbox Control", "Show REC", 1);
+    addCtrl("ADBE Checkbox Control", "Scanlines", 1);
 
     var BOX = "var c = " + CTRL + '.effect("Box Center")("Point");\n' +
               "var s = " + CTRL + '.effect("Box Size")("Point");\n' +
@@ -103,14 +103,14 @@
     addPath(box, "Cross V", BOX + "createPath([[c[0],c[1]-28],[c[0],c[1]-14]], [], [], false);", 1.5, 80);
 
     // Box labels follow the box.
-    var tTitle = addText("Title", "GR33N.EXE", 26, BOX + "[x0, y0 - 14];", true);
-    var tLens = addText("Lens Label", "LENS:R3D", 19, BOX + "[x0 + s[0] * 0.875, y0 + s[1] * 0.17];", true);
-    var tId = addText("ID Line", "ID:DR.GR33N  MATCH 98.6%   SUBJ_01", 19, BOX + "[x0, y1 + 28];", true);
+    addText("Title", "GR33N.EXE", 26, BOX + "[x0, y0 - 14];", true);
+    addText("Lens Label", "LENS:R3D", 19, BOX + "[x0 + s[0] * 0.875, y0 + s[1] * 0.17];", true);
+    addText("ID Line", "ID:DR.GR33N  MATCH 98.6%   SUBJ_01", 19, BOX + "[x0, y1 + 28];", true);
 
     // Info block (top-left) with a rule above it and a live frame counter.
     var info = addShapeLayer("Info Rule");
     addPath(info, "Rule", "createPath([[60,52],[330,52]], [], [], false);", 1, 60);
-    var tInfo = addText("Info Block", "THERMAL // IR-7\rTEMP  36.0 C\rTRACK ▸ LOCKED", 19, [60, 77], true);
+    addText("Info Block", "THERMAL // IR-7\rTEMP  36.0 C\rTRACK ▸ LOCKED", 19, [60, 77], true);
     var fr = comp.layers.addText("FR:04594");
     fr.name = "Frame Counter";
     var frDoc = fr.property("ADBE Text Properties").property("ADBE Text Document");
@@ -156,16 +156,29 @@
     // --- Essential Graphics -----------------------------------------------------
     comp.motionGraphicsTemplateName = "VizzFX HUD";
     comp.openInEssentialGraphics();
-    tTitle.addToMotionGraphicsTemplateAs(comp, "Title");
-    tId.addToMotionGraphicsTemplateAs(comp, "ID Line");
-    tLens.addToMotionGraphicsTemplateAs(comp, "Lens Label");
-    tInfo.addToMotionGraphicsTemplateAs(comp, "Info Block");
-    pCenter.addToMotionGraphicsTemplateAs(comp, "Box Center");
-    pSize.addToMotionGraphicsTemplateAs(comp, "Box Size");
-    pColor.addToMotionGraphicsTemplateAs(comp, "HUD Color");
-    pSpeed.addToMotionGraphicsTemplateAs(comp, "Type Speed");
-    pRec.addToMotionGraphicsTemplateAs(comp, "Show REC");
-    pLines.addToMotionGraphicsTemplateAs(comp, "Scanlines");
+    // Look everything up again by name: adding effects or layers in After Effects
+    // invalidates property references taken earlier ("Object is invalid").
+    function textSource(layerName) {
+        return comp.layer(layerName).property("ADBE Text Properties").property("ADBE Text Document");
+    }
+    function control(name) {
+        return comp.layer("HUD Controls").property("ADBE Effect Parade").property(name).property(1);
+    }
+    var exposed = [
+        [textSource("Title"), "Title"],
+        [textSource("ID Line"), "ID Line"],
+        [textSource("Lens Label"), "Lens Label"],
+        [textSource("Info Block"), "Info Block"],
+        [control("Box Center"), "Box Center"],
+        [control("Box Size"), "Box Size"],
+        [control("HUD Color"), "HUD Color"],
+        [control("Type Speed"), "Type Speed"],
+        [control("Show REC"), "Show REC"],
+        [control("Scanlines"), "Scanlines"]
+    ];
+    for (var i = 0; i < exposed.length; i++) {
+        exposed[i][0].addToMotionGraphicsTemplateAs(comp, exposed[i][1]);
+    }
     app.endUndoGroup();
 
     var out = new File(Folder.desktop.fsName + "/VizzFX_HUD.mogrt");
