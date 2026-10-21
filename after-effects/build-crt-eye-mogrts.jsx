@@ -154,7 +154,7 @@
         fib().property("ADBE Effect Parade").addProperty("ADBE Fill");
         fib().property("ADBE Effect Parade").property("ADBE Fill").property("ADBE Fill-0002").setValue([0, 0, 0]);
         gaussian(ey, "Iris Fibers", E + "v(\"Softness\") * 0.5;");
-        fib().property("ADBE Transform Group").property("ADBE Rotation").expression = E + "time * v(\"Rotation Speed\");";
+        fib().property("ADBE Transform Group").property("ADBE Rotate Z").expression = E + "time * v(\"Rotation Speed\");";
         fib().property("ADBE Transform Group").property("ADBE Opacity").expression = E + "v(\"Fiber Opacity\");";
         fib().property("ADBE Transform Group").property("ADBE Scale").expression =
             E + "var s = v(\"Iris Size\") * vh / " + S + " * 1.15; [s, s];";
