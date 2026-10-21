@@ -198,7 +198,17 @@ const origLoad = Module._load;
 const uxpMock = {
   host: { name: "premierepro", version: "26.3.2" },
   storage: { localFileSystem: {
-    getPluginFolder: async () => ({ nativePath: path.resolve(path.dirname(process.argv[2])) }),
+    getPluginFolder: async () => {
+      const dir = path.resolve(path.dirname(process.argv[2]));
+      return {
+        nativePath: dir,
+        getEntry: async (rel) => {
+          const full = path.join(dir, rel);
+          if (!require("fs").existsSync(full)) throw new Error("not found: " + rel);
+          return { nativePath: full };
+        },
+      };
+    },
     getFileForOpening: async () => ({ nativePath: "/Users/me/Desktop/VizzFX_HUD.mogrt" }),
   } },
 };

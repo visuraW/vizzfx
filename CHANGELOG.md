@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.1
+- HUD template bundled: Tracking HUD works without After Effects.
+
 ## 1.5.0
 - New looks: Low Shutter, Thermal, Tracking HUD.
 - Thermal LUT tuned to reference footage; After Effects script that builds the HUD template.

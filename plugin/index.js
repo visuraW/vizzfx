@@ -1,7 +1,7 @@
 /** @type {import('@adobe/premierepro').premierepro} */
 const ppro = require("premierepro");
 
-const VERSION = "1.5.0";
+const VERSION = "1.5.1";
 
 // ---------------------------------------------------------------------------
 // Look definitions. Param keys are effect parameter display names, matched
@@ -800,13 +800,11 @@ async function applyThermal({ project, item }) {
 
 // HUD: inserts the VizzFX HUD template on a free track above the clip, trimmed to the clip.
 async function hudPath() {
-  const bundled = await pluginFile(`mogrt/${HUD_MOGRT}`);
   try {
-    if (bundled) {
-      require("fs").lstatSync(bundled);
-      return bundled;
-    }
-  } catch (e) { /* not bundled yet */ }
+    const folder = await require("uxp").storage.localFileSystem.getPluginFolder();
+    const entry = await folder.getEntry(`mogrt/${HUD_MOGRT}`);
+    if (entry) return entry.nativePath;
+  } catch (e) { /* not bundled */ }
   try {
     const saved = localStorage.getItem("vizzfx-hud-path");
     if (saved) return saved;
